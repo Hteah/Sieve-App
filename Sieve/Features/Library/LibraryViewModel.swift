@@ -1,6 +1,7 @@
 import Foundation
 import GRDB
 import Observation
+import SwiftUI
 import os
 
 /// Drives the sidebar + table: observes the DB for the current filter and keeps selection.
@@ -65,7 +66,8 @@ final class LibraryViewModel {
     func root(for id: Int64) -> Root? { roots.first { $0.id == id } }
 
     /// Reorders the rows already in memory for the current sort — no database round-trip.
-    /// Large lists are sorted off the main actor so the direction toggle never blocks the UI.
+    /// Large lists are sorted off the main actor. The assignment is made without an implicit
+    /// animation so the table doesn't choreograph hundreds of row moves.
     private func sortRowsInPlace() {
         let sort = filter.sort
         let ascending = filter.sortAscending
@@ -73,7 +75,12 @@ final class LibraryViewModel {
         sortTask?.cancel()
 
         guard source.count > 1_000 else {
-            rows = source.sorted { sort.rowsAreInOrder($0, $1, ascending: ascending) }
+            let clock = ContinuousClock()
+            let start = clock.now
+            let sorted = source.sorted { sort.rowsAreInOrder($0, $1, ascending: ascending) }
+            let elapsed = clock.now - start
+            Self.log.info("sort \(source.count) rows by \(sort.rawValue, privacy: .public) asc=\(ascending): \(elapsed.description, privacy: .public)")
+            assignRows(sorted)
             return
         }
         sortTask = Task { [weak self] in
@@ -82,8 +89,14 @@ final class LibraryViewModel {
             }.value
             guard !Task.isCancelled, let self,
                   self.filter.sort == sort, self.filter.sortAscending == ascending else { return }
-            self.rows = sorted
+            self.assignRows(sorted)
         }
+    }
+
+    private func assignRows(_ newRows: [SampleRow]) {
+        var tx = Transaction()
+        tx.disablesAnimations = true
+        withTransaction(tx) { rows = newRows }
     }
 
     // MARK: Observation

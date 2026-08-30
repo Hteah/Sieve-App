@@ -215,7 +215,7 @@ struct WaveformCell: View {
     var onSeek: ((Double) -> Void)? = nil
 
     var body: some View {
-        let summary = row.waveform.flatMap(WaveformSummary.init(encoded:))
+        let summary = env.waveformCache.summary(id: row.id, data: row.waveform)
         let playhead: Double? = (env.player.currentSampleId == row.id && env.player.duration > 0)
             ? env.player.position / env.player.duration : nil
         GeometryReader { geo in

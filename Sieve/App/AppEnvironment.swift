@@ -11,6 +11,7 @@ final class AppEnvironment {
     let scanner: ScanCoordinator
     let player: PreviewPlayer
     let volumeMonitor: VolumeMonitor
+    let waveformCache = WaveformCache()
     var scanState = ScanState()
     var lastError: String?
     /// Display name of the user's chosen external audio editor, or nil if none is set.
