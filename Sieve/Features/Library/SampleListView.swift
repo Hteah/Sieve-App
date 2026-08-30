@@ -14,12 +14,10 @@ struct SampleListView: View {
         ("name", 280),
         ("duration", 360),
         ("rate", 430),
-        ("channels", 470),
-        ("bits", 510),
-        ("peak", 580),
-        ("rating", 670),
-        ("tags", 790),
-        ("size", 890),
+        ("bits", 470),
+        ("rating", 560),
+        ("tags", 680),
+        ("size", 780),
     ]
 
     var body: some View {
@@ -66,17 +64,8 @@ struct SampleListView: View {
                     .width(60).customizationID("duration")
                 TableColumn("Rate") { row in Text(Fmt.sampleRate(row.sampleRate)) }
                     .width(60).customizationID("rate")
-                TableColumn("Ch") { row in Text(row.channels.map(String.init) ?? "–") }
-                    .width(28).customizationID("channels")
                 TableColumn("Bits") { row in Text(row.bitDepth.map(String.init) ?? "–") }
                     .width(32).customizationID("bits")
-                TableColumn("Peak") { row in
-                    HStack(spacing: 3) {
-                        Text(Fmt.db(row.peakDb)).monospacedDigit()
-                        if (row.clippedSamples ?? 0) > 0 { Circle().fill(.red).frame(width: 6, height: 6).help("Clipping") }
-                    }
-                }
-                .width(72).customizationID("peak")
                 TableColumn("Rating") { row in
                     StarRatingView(rating: row.rating ?? 0) { r in
                         Task { try? await AnnotationStore(database: env.database).setRating(r, for: row) }
