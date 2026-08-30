@@ -85,6 +85,10 @@ struct SampleListView: View {
                 TableColumn("Size") { row in Text(Fmt.bytes(row.fileSize)).monospacedDigit() }
                     .width(64).customizationID("size")
             }
+            // Re-sorting reshuffles nearly every row; diffing 800+ scrambled rows is what
+            // stalled the UI. Keying the table to the sort makes SwiftUI rebuild it once
+            // (rendering only the visible rows) instead. Cost: scroll jumps to the top.
+            .id(sortToken)
             .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width in
                 tableWidth = width
                 applyResponsiveColumns(width: width)
@@ -133,6 +137,12 @@ struct SampleListView: View {
             Divider()
             statusBar
         }
+    }
+
+    /// Changes only when the sort field or direction changes, so the table rebuilds then and
+    /// nowhere else (selection, rescans, tag edits still update in place).
+    private var sortToken: String {
+        "\(model.filter.sort.rawValue)-\(model.filter.sortAscending)"
     }
 
     private func applyResponsiveColumns(width: CGFloat) {
