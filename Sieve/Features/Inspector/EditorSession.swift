@@ -27,7 +27,9 @@ final class EditorSession {
     private(set) var mip: PeakMip?
     private(set) var thumbnail: WaveformSummary?
     var selection: Range<Int>?
-    var looping = false
+    var looping = false {
+        didSet { if oldValue != looping, player.isPlaying { startPlayback() } }
+    }
     private(set) var isBusy = false
     private(set) var loadError: String?
     private(set) var clipboard: AudioClip?
@@ -105,6 +107,7 @@ final class EditorSession {
         undo.removeAll(); redo.removeAll(); undoBytes = 0
         editSerial = 0; savedSerial = 0
         selection = nil
+        cursor = 0
         loadError = nil
 
         guard row.status == .present,
@@ -153,6 +156,7 @@ final class EditorSession {
     func discard() {
         player.stop()
         clip = nil; mip = nil; thumbnail = nil; source = nil; selection = nil
+        cursor = 0
         undo.removeAll(); redo.removeAll(); undoBytes = 0
         editSerial = 0; savedSerial = 0
         loadError = nil
@@ -182,6 +186,7 @@ final class EditorSession {
         undo.removeAll(); redo.removeAll(); undoBytes = 0
         editSerial = 0; savedSerial = 0
         selection = nil
+        cursor = 0
         isBusy = true
         let outcome = await Self.loadClip(url: src.url, rootURL: src.rootURL, maxFrames: Self.maxFrames)
         isBusy = false
@@ -257,6 +262,7 @@ final class EditorSession {
         editSerial += 1
         clip = prev
         selection = selection.flatMap { Self.clamp($0, count: prev.frameCount) }
+        cursor = min(cursor, prev.frameCount)
         rebuildMip(for: prev)
     }
 
@@ -266,6 +272,7 @@ final class EditorSession {
         editSerial += 1
         clip = next
         selection = selection.flatMap { Self.clamp($0, count: next.frameCount) }
+        cursor = min(cursor, next.frameCount)
         rebuildMip(for: next)
     }
 
@@ -278,25 +285,35 @@ final class EditorSession {
 
     // MARK: Playback
 
+    /// Insertion point where playback starts when nothing is selected. Set by clicking the
+    /// waveform; shown as a line when not playing.
+    var cursor = 0
+
+    /// What Play / Loop act on: the selection if there is one, otherwise from the cursor to the end.
+    private var playbackRange: Range<Int> {
+        guard let clip, clip.frameCount > 0 else { return 0..<0 }
+        if let s = selection, !s.isEmpty { return clip.clampedRange(s) }
+        let start = max(0, min(cursor, clip.frameCount - 1))
+        return start..<clip.frameCount
+    }
+
     func togglePlay() {
-        if player.isPlaying { player.stop() }
-        else if hasSelection { playSelection() }
-        else { playAll() }
+        if player.isPlaying { player.stop() } else { startPlayback() }
     }
 
-    func playAll() {
-        guard let clip else { return }
+    func startPlayback() {
+        guard let clip, playbackRange.count > 0 else { return }
         env.player.stop()
-        player.play(clip, range: nil, looping: false)
-    }
-
-    func playSelection() {
-        guard let clip else { return }
-        env.player.stop()
-        player.play(clip, range: hasSelection ? effectiveRange : nil, looping: looping)
+        player.play(clip, range: playbackRange, looping: looping)
     }
 
     func stopPlayback() { player.stop() }
+
+    /// Moves the insertion point (from a waveform click); jumps live playback there too.
+    func setCursor(_ frame: Int) {
+        cursor = max(0, min(frameCount, frame))
+        if player.isPlaying { startPlayback() }
+    }
 
     // MARK: Save
 
@@ -391,6 +408,7 @@ final class EditorSession {
         editSerial += 1
         clip = next
         selection = newSelection(edited).flatMap { Self.clamp($0, count: next.frameCount) }
+        cursor = min(cursor, next.frameCount)
         rebuildMip(for: next)
     }
 

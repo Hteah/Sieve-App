@@ -117,20 +117,21 @@ struct AudioEditorView: View {
             mip: session.mip,
             selection: Binding(get: { session.selection }, set: { session.selection = $0 }),
             playheadFrame: mirroredPlayhead,
+            onClickSeek: { session.setCursor($0) },
             resetToken: session.source?.sampleId
         )
         .frame(minHeight: 130, maxHeight: .infinity)
     }
 
-    /// The editor's own playhead, or — if the list preview is playing this same file — the
-    /// preview player's position, so playback started from the list shows here too.
+    /// While playing: the editor's own playhead (or the list preview's, if that's what's playing
+    /// this file). While stopped: the click cursor, so you can see where playback will start.
     private var mirroredPlayhead: Int? {
         if session.player.isPlaying { return session.player.playheadFrame }
         if env.player.currentSampleId == session.source?.sampleId, env.player.isPlaying,
            env.player.duration > 0, session.frameCount > 0 {
             return Int(env.player.position / env.player.duration * Double(session.frameCount))
         }
-        return nil
+        return session.hasClip ? session.cursor : nil
     }
 
     private var transport: some View {
@@ -138,19 +139,20 @@ struct AudioEditorView: View {
             Button { session.togglePlay() } label: {
                 Image(systemName: session.player.isPlaying ? "stop.fill" : "play.fill")
             }
-            Button { session.playSelection() } label: { Image(systemName: "play.rectangle") }
-                .help("Play selection").disabled(!session.hasSelection)
+            .help(session.hasSelection ? "Play the selection" : "Play from the cursor")
             Toggle(isOn: Binding(get: { session.looping }, set: { session.looping = $0 })) {
                 Image(systemName: "repeat")
             }
-            .toggleStyle(.button).help("Loop")
+            .toggleStyle(.button)
+            .help(session.hasSelection ? "Loop the selection" : "Loop")
 
-            Text(Fmt.duration(Double(session.player.playheadFrame) / max(1, session.sampleRate)))
+            Text(Fmt.duration(Double(mirroredPlayhead ?? 0) / max(1, session.sampleRate)))
                 .font(.caption).monospacedDigit().foregroundStyle(.secondary)
 
             Spacer()
 
-            Text("Scroll to zoom · drag to select").font(.caption2).foregroundStyle(.tertiary)
+            Text("Click to set the play point · drag to select · scroll to zoom")
+                .font(.caption2).foregroundStyle(.tertiary)
         }
         .buttonStyle(.bordered)
         .controlSize(.small)

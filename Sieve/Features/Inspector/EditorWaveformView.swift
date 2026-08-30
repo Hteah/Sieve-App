@@ -9,6 +9,8 @@ struct EditorWaveformView: View {
     let mip: PeakMip?
     @Binding var selection: Range<Int>?
     var playheadFrame: Int?
+    /// Called with the clicked frame when the user clicks (not drags) the waveform.
+    var onClickSeek: ((Int) -> Void)? = nil
     /// Changes when a different file is loaded; resets the zoom/scroll window.
     var resetToken: AnyHashable?
 
@@ -89,7 +91,10 @@ struct EditorWaveformView: View {
             selection = lo < hi ? lo..<hi : nil
         case .ended:
             let framesPerPixel = Double(span) / Double(max(1, width))
-            if let a = dragAnchor, abs(a - f) <= max(1, Int(3 * framesPerPixel)) { selection = nil }
+            if let a = dragAnchor, abs(a - f) <= max(1, Int(3 * framesPerPixel)) {
+                selection = nil          // a click clears the selection…
+                onClickSeek?(f)          // …and moves the playhead here
+            }
             dragAnchor = nil
         }
     }
