@@ -30,6 +30,20 @@ extension AppEnvironment {
         rootURL(for: row.rootId)?.appending(path: row.relativePath)
     }
 
+    /// The id of the indexed root that contains `url`, if any (used to rescan after a save).
+    func rootId(containing url: URL) -> Int64? {
+        let path = url.standardizedFileURL.path
+        guard let roots = try? database.reader.read({ db in try Root.fetchAll(db) }) else { return nil }
+        for root in roots {
+            guard let id = root.id, let rootURL = rootURL(for: id) else { continue }
+            let rootPath = rootURL.standardizedFileURL.path
+            if path == rootPath || path.hasPrefix(rootPath.hasSuffix("/") ? rootPath : rootPath + "/") {
+                return id
+            }
+        }
+        return nil
+    }
+
     func revealInFinder(_ row: SampleRow) {
         guard let root = rootURL(for: row.rootId), let url = fileURL(for: row) else { return }
         withSecurityScope(root) { NSWorkspace.shared.activateFileViewerSelecting([url]) }
@@ -37,11 +51,13 @@ extension AppEnvironment {
 
     func togglePreview(_ row: SampleRow) {
         guard let root = rootURL(for: row.rootId), let url = fileURL(for: row) else { return }
+        editor.player.stop()
         player.toggle(url: url, sampleId: row.id, rootURL: root)
     }
 
     func preview(_ row: SampleRow) {
         guard let root = rootURL(for: row.rootId), let url = fileURL(for: row) else { return }
+        editor.player.stop()
         player.play(url: url, sampleId: row.id, rootURL: root)
     }
 

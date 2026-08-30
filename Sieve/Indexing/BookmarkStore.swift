@@ -53,6 +53,21 @@ final class BookmarkStore: Sendable {
               let r = try? resolve(data) else { return nil }
         return r.url
     }
+
+    // Remembered folder for the editor's "Save As New…" (bookmark stored in UserDefaults).
+    private static let saveDestinationKey = "saveDestinationBookmark"
+
+    func rememberSaveDestination(_ url: URL) {
+        if let data = try? makeBookmark(for: url) {
+            UserDefaults.standard.set(data, forKey: Self.saveDestinationKey)
+        }
+    }
+
+    func lastSaveDestination() -> URL? {
+        guard let data = UserDefaults.standard.data(forKey: Self.saveDestinationKey),
+              let r = try? resolve(data) else { return nil }
+        return r.url
+    }
 }
 
 /// Runs `body` while holding security-scoped access to `url`. Balanced start/stop.

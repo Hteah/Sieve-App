@@ -12,6 +12,8 @@ final class AppEnvironment {
     let player: PreviewPlayer
     let volumeMonitor: VolumeMonitor
     let waveformCache = WaveformCache()
+    /// The inspector's audio-editing session (Edit tab + pop-out window share this one).
+    @ObservationIgnored lazy var editor: EditorSession = EditorSession(env: self)
     var scanState = ScanState()
     var lastError: String?
     /// Display name of the user's chosen external audio editor, or nil if none is set.
