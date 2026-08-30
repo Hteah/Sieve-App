@@ -11,7 +11,16 @@ final class LibraryViewModel {
     private static let log = Logger(subsystem: "com.arlo.Sieve", category: "library")
 
     var filter = SampleFilter() {
-        didSet { if filter != oldValue { restartRowsObservation() } }
+        didSet {
+            guard filter != oldValue else { return }
+            // A pure sort change (field or direction) just reorders the rows already in memory —
+            // no need to tear down the observation and re-decode the whole table from SQLite.
+            if filter.samePredicate(as: oldValue) {
+                sortRowsInPlace()
+            } else {
+                restartRowsObservation()
+            }
+        }
     }
     private(set) var rows: [SampleRow] = []
     private(set) var roots: [Root] = []
@@ -54,6 +63,13 @@ final class LibraryViewModel {
 
     func root(for id: Int64) -> Root? { roots.first { $0.id == id } }
 
+    /// Reorders `rows` for the current sort without touching the database.
+    private func sortRowsInPlace() {
+        let sort = filter.sort
+        let ascending = filter.sortAscending
+        rows.sort { sort.rowsAreInOrder($0, $1, ascending: ascending) }
+    }
+
     // MARK: Observation
 
     private func restartRowsObservation() {
@@ -66,6 +82,7 @@ final class LibraryViewModel {
                 for try await rows in observation.values(in: database.reader) {
                     guard let self, !Task.isCancelled else { return }
                     self.rows = rows
+                    self.sortRowsInPlace()
                     self.isLoading = false
                     // Drop selection entries that no longer exist.
                     let ids = Set(rows.map(\.id))

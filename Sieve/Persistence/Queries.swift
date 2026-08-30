@@ -57,6 +57,49 @@ enum SampleSort: String, CaseIterable, Sendable, Identifiable {
         }
         return parts.joined(separator: ", ")
     }
+
+    /// In-memory equivalent of `sqlOrder`, so a sort-field or direction change can reorder the
+    /// rows already loaded instead of re-querying and re-decoding the whole table. NULLs sort
+    /// last in both directions; `id` is the final tie-breaker for a stable order.
+    func rowsAreInOrder(_ a: SampleRow, _ b: SampleRow, ascending: Bool) -> Bool {
+        let tie = {
+            let r = a.filename.localizedCaseInsensitiveCompare(b.filename)
+            return r == .orderedSame ? a.id < b.id : r == .orderedAscending
+        }
+        switch self {
+        case .name:
+            let r = a.filename.localizedCaseInsensitiveCompare(b.filename)
+            if r != .orderedSame { return ascending == (r == .orderedAscending) }
+            if a.relativePath != b.relativePath { return ascending == (a.relativePath < b.relativePath) }
+            return a.id < b.id
+        case .path:
+            let r = a.relativePath.localizedCaseInsensitiveCompare(b.relativePath)
+            if r != .orderedSame { return ascending == (r == .orderedAscending) }
+            return a.id < b.id
+        case .duration:
+            return Self.orderOptional(a.durationSec, b.durationSec, ascending: ascending, tie: tie)
+        case .size:
+            return a.fileSize == b.fileSize ? tie() : ascending == (a.fileSize < b.fileSize)
+        case .modified:
+            return a.modifiedAt == b.modifiedAt ? tie() : ascending == (a.modifiedAt < b.modifiedAt)
+        case .rating:
+            let ra = a.rating ?? 0, rb = b.rating ?? 0
+            return ra == rb ? tie() : ascending == (ra < rb)
+        case .rate:
+            return Self.orderOptional(a.sampleRate, b.sampleRate, ascending: ascending, tie: tie)
+        case .bits:
+            return Self.orderOptional(a.bitDepth, b.bitDepth, ascending: ascending, tie: tie)
+        }
+    }
+
+    private static func orderOptional<T: Comparable>(_ x: T?, _ y: T?, ascending: Bool, tie: () -> Bool) -> Bool {
+        switch (x, y) {
+        case let (x?, y?): return x == y ? tie() : ascending == (x < y)
+        case (nil, nil): return tie()
+        case (nil, _): return false   // unknown value sorts last, whichever direction
+        case (_, nil): return true
+        }
+    }
 }
 
 /// Which sidebar item is selected. Drives the base query.
@@ -82,6 +125,14 @@ struct SampleFilter: Hashable, Sendable {
     mutating func select(_ newSort: SampleSort) {
         sort = newSort
         sortAscending = newSort.defaultAscending
+    }
+
+    /// True when everything that shapes the query result set (not its order) is unchanged.
+    func samePredicate(as other: SampleFilter) -> Bool {
+        scope == other.scope
+            && searchText == other.searchText
+            && minRating == other.minRating
+            && extensions == other.extensions
     }
 }
 
