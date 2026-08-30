@@ -95,21 +95,18 @@ enum AudioConverter {
         let temp = dir.appending(path: ".sieve-convert-\(UUID().uuidString).wav")
         do {
             try runConversion(source: source, destination: temp, settings: settings)
-            try validate(temp: temp, source: source, settings: settings)
 
-            if finalURL == source {
-                _ = try fm.replaceItemAt(source, withItemAt: temp)
-            } else {
-                try fm.moveItem(at: temp, to: finalURL)
-                do {
-                    try fm.removeItem(at: source)
-                } catch {
-                    log.error("converted \(filename, privacy: .public) but could not delete the original: \(error, privacy: .public)")
-                }
-            }
-            let newHash = AudioAnalyzer.analyze(url: finalURL).audioHash
+            let src = try AVAudioFile(forReading: source)
+            let targetSR = settings.sampleRate == .keep ? src.fileFormat.sampleRate : Double(settings.sampleRate.rawValue)
+            let expected = Double(src.length) * (targetSR / src.fileFormat.sampleRate)
+            try AudioFileIO.validateFile(at: temp, expectedRate: targetSR,
+                                        expectedChannels: Int(src.fileFormat.channelCount),
+                                        minFrames: max(0, Int(expected * 0.9) - 64))
+
+            let written = try AudioFileIO.replaceInPlace(originalURL: source, tempURL: temp)
+            let newHash = AudioAnalyzer.analyze(url: written).audioHash
             return ConvertResult(id: job.sampleId, filename: filename,
-                                 outcome: .converted(finalURL: finalURL, newHash: newHash))
+                                 outcome: .converted(finalURL: written, newHash: newHash))
         } catch {
             try? fm.removeItem(at: temp)
             log.error("convert failed for \(filename, privacy: .public): \(error, privacy: .public)")
@@ -126,9 +123,9 @@ enum AudioConverter {
         guard srcFormat.channelCount > 0 else { throw ConvertError.unsupportedSource }
 
         let targetSR = settings.sampleRate == .keep ? srcFile.fileFormat.sampleRate : Double(settings.sampleRate.rawValue)
-        let outSettings = pcmSettings(sampleRate: targetSR,
-                                      channels: Int(srcFormat.channelCount),
-                                      bitDepth: resolvedBitDepth(settings.bitDepth, source: srcFile.fileFormat))
+        let outSettings = AudioFileIO.pcmSettings(sampleRate: targetSR,
+                                                  channels: Int(srcFormat.channelCount),
+                                                  bits: AudioFileIO.resolvedBits(settings.bitDepth, sourceFormat: srcFile.fileFormat))
         let outFile = try AVAudioFile(forWriting: destination, settings: outSettings,
                                       commonFormat: .pcmFormatFloat32, interleaved: false)
         let dstFormat = outFile.processingFormat
@@ -189,64 +186,11 @@ enum AudioConverter {
         }
     }
 
-    /// Re-opens the freshly written file and checks it matches what was asked for.
-    private static func validate(temp: URL, source: URL, settings: ConvertSettings) throws {
-        let out = try AVAudioFile(forReading: temp)
-        let src = try AVAudioFile(forReading: source)
-        guard out.length > 0 else { throw ConvertError.emptyOutput }
-        let targetSR = settings.sampleRate == .keep ? src.fileFormat.sampleRate : Double(settings.sampleRate.rawValue)
-        guard abs(out.fileFormat.sampleRate - targetSR) < 1 else { throw ConvertError.wrongSampleRate }
-        guard out.fileFormat.channelCount == src.fileFormat.channelCount else { throw ConvertError.wrongChannels }
-        let expected = Double(src.length) * (targetSR / src.fileFormat.sampleRate)
-        guard Double(out.length) > expected * 0.9 - 64 else { throw ConvertError.truncated }
-    }
-
-    private enum ResolvedBits { case int(Int); case float }
-
-    private static func resolvedBitDepth(_ option: BitDepthOption, source: AVAudioFormat) -> ResolvedBits {
-        switch option {
-        case .int16: return .int(16)
-        case .int24: return .int(24)
-        case .float32: return .float
-        case .keep:
-            let asbd = source.streamDescription.pointee
-            if asbd.mFormatFlags & kAudioFormatFlagIsFloat != 0 { return .float }
-            switch asbd.mBitsPerChannel {
-            case 8, 16: return .int(16)
-            case 24: return .int(24)
-            default: return .int(24)
-            }
-        }
-    }
-
-    private static func pcmSettings(sampleRate: Double, channels: Int, bitDepth: ResolvedBits) -> [String: Any] {
-        var s: [String: Any] = [
-            AVFormatIDKey: kAudioFormatLinearPCM,
-            AVSampleRateKey: sampleRate,
-            AVNumberOfChannelsKey: channels,
-            AVLinearPCMIsBigEndianKey: false,
-            AVLinearPCMIsNonInterleaved: false,
-        ]
-        switch bitDepth {
-        case .int(let bits):
-            s[AVLinearPCMBitDepthKey] = bits
-            s[AVLinearPCMIsFloatKey] = false
-        case .float:
-            s[AVLinearPCMBitDepthKey] = 32
-            s[AVLinearPCMIsFloatKey] = true
-        }
-        return s
-    }
-
     enum ConvertError: Error, LocalizedError {
         case unsupportedSource
         case converterUnavailable
         case allocationFailed
         case conversionFailed
-        case emptyOutput
-        case wrongSampleRate
-        case wrongChannels
-        case truncated
 
         var errorDescription: String? {
             switch self {
@@ -254,10 +198,6 @@ enum AudioConverter {
             case .converterUnavailable: "No converter is available for this format."
             case .allocationFailed: "Ran out of memory during conversion."
             case .conversionFailed: "The audio conversion failed."
-            case .emptyOutput: "The converted file came out empty."
-            case .wrongSampleRate: "The converted file has the wrong sample rate."
-            case .wrongChannels: "The converted file has the wrong channel count."
-            case .truncated: "The converted file is shorter than expected."
             }
         }
     }
