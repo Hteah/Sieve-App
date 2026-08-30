@@ -32,6 +32,7 @@ final class LibraryViewModel {
     @ObservationIgnored private var rowsTask: Task<Void, Never>?
     @ObservationIgnored private var sidebarTask: Task<Void, Never>?
     @ObservationIgnored private var searchDebounce: Task<Void, Never>?
+    @ObservationIgnored private var sortTask: Task<Void, Never>?
 
     init(database: AppDatabase) {
         self.database = database
@@ -63,11 +64,26 @@ final class LibraryViewModel {
 
     func root(for id: Int64) -> Root? { roots.first { $0.id == id } }
 
-    /// Reorders `rows` for the current sort without touching the database.
+    /// Reorders the rows already in memory for the current sort — no database round-trip.
+    /// Large lists are sorted off the main actor so the direction toggle never blocks the UI.
     private func sortRowsInPlace() {
         let sort = filter.sort
         let ascending = filter.sortAscending
-        rows.sort { sort.rowsAreInOrder($0, $1, ascending: ascending) }
+        let source = rows
+        sortTask?.cancel()
+
+        guard source.count > 1_000 else {
+            rows = source.sorted { sort.rowsAreInOrder($0, $1, ascending: ascending) }
+            return
+        }
+        sortTask = Task { [weak self] in
+            let sorted = await Task.detached(priority: .userInitiated) {
+                source.sorted { sort.rowsAreInOrder($0, $1, ascending: ascending) }
+            }.value
+            guard !Task.isCancelled, let self,
+                  self.filter.sort == sort, self.filter.sortAscending == ascending else { return }
+            self.rows = sorted
+        }
     }
 
     // MARK: Observation
@@ -81,8 +97,8 @@ final class LibraryViewModel {
             do {
                 for try await rows in observation.values(in: database.reader) {
                     guard let self, !Task.isCancelled else { return }
-                    self.rows = rows
-                    self.sortRowsInPlace()
+                    self.sortTask?.cancel()
+                    self.rows = rows            // already ordered by the query's ORDER BY
                     self.isLoading = false
                     // Drop selection entries that no longer exist.
                     let ids = Set(rows.map(\.id))

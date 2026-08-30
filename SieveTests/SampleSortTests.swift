@@ -35,16 +35,15 @@ struct SampleSortTests {
         #expect(desc.map(\.id) == [3, 2, 1])
     }
 
-    @Test func tiesBreakByNameThenId() {
+    @Test func tiesBreakByIdInBothDirections() {
         let rows = [
-            row(5, name: "zed", rate: 48_000, bits: 24),
             row(6, name: "abc", rate: 48_000, bits: 24),
+            row(5, name: "zed", rate: 48_000, bits: 24),
         ]
         let asc = rows.sorted { SampleSort.rate.rowsAreInOrder($0, $1, ascending: true) }
-        #expect(asc.map(\.id) == [6, 5])
-        // Tie-breaker stays ascending even when the primary sort is descending.
+        #expect(asc.map(\.id) == [5, 6])
         let desc = rows.sorted { SampleSort.rate.rowsAreInOrder($0, $1, ascending: false) }
-        #expect(desc.map(\.id) == [6, 5])
+        #expect(desc.map(\.id) == [5, 6])
     }
 
     @Test func selectSnapsDirectionToFieldDefault() {
