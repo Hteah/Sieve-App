@@ -7,7 +7,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Sieve is a native SwiftUI macOS app (macOS 26, Swift 6 strict concurrency) that indexes a music producer's
 sample folders, shows amplitude-accurate waveforms, lets the user tag/rate/annotate samples, and finds exact
 duplicates. Indexing never touches files on disk; the only writes are explicit user actions — Trash/Move in the
-Duplicates view and "Convert Sample Rate / Bit Depth" on the list selection (`Audio/AudioConverter`, rewrites in place).
+Duplicates view, "Convert Sample Rate / Bit Depth" on the list selection (`Audio/AudioConverter`), and the
+inspector's Edit tab / pop-out editor window (`Features/Inspector/EditorSession` + `Audio/AudioClip`, in-memory
+edit then Save As New or replace in place). File writes go through `Audio/AudioFileIO` (temp → validate → atomic
+replace; a non-WAV source becomes a sibling `.wav`).
 
 ## Build, test, run
 

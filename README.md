@@ -7,6 +7,9 @@ A lightweight native macOS app for organizing music-production sample collection
 - **See amplitude**: every row shows a stereo-lane waveform with peak outline and RMS body; the inspector has a
   zoomable full-resolution waveform plus peak dBFS, RMS dBFS and a clipping counter.
 - **Preview** with Space or double-click; click the waveform to seek.
+- **Edit** in the inspector's Edit tab (or a pop-out window): drag-select a region, then trim, delete,
+  normalize, amplify, reverse, fade, silence, cut/copy/paste, with undo/redo and looped selection playback.
+  Save to a new WAV or replace the original in place.
 - **Tag, rate, favorite, annotate.** Metadata is keyed by the audio content hash, so it follows files that are
   renamed or moved, and identical copies share it.
 - **Find exact duplicates** across packs (WAV vs AIFF vs re-tagged copies of the same audio all match). Choose

@@ -5,6 +5,13 @@ struct ContentView: View {
     @State private var model: LibraryViewModel?
     @AppStorage("showInspector") private var showInspector = true
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
+    @State private var pendingSwitch: PendingSwitch?
+
+    private struct PendingSwitch: Identifiable {
+        let id = UUID()
+        let row: SampleRow
+        let previousId: Int64?
+    }
 
     private var sidebarShown: Bool {
         showInspector ? (columnVisibility == .all) : (columnVisibility != .detailOnly)
@@ -23,6 +30,36 @@ struct ContentView: View {
                                 .help("Rescan all folders")
                                 .disabled(env.scanState.isScanning)
                         }
+                    }
+                    .onChange(of: model.primarySelection?.id) { oldId, _ in
+                        guard env.editor.isActive, let row = model.primarySelection,
+                              row.id != env.editor.source?.sampleId else { return }
+                        if env.editor.isDirty {
+                            pendingSwitch = PendingSwitch(row: row, previousId: oldId)
+                        } else {
+                            Task { await env.editor.open(row: row) }
+                        }
+                    }
+                    .confirmationDialog(
+                        "Unsaved Edits",
+                        isPresented: Binding(get: { pendingSwitch != nil },
+                                             set: { if !$0 { pendingSwitch = nil } }),
+                        presenting: pendingSwitch
+                    ) { pending in
+                        Button("Save & Switch") {
+                            Task {
+                                await env.editor.saveReplacingOriginal(bits: env.editor.source?.sourceBits ?? .int24)
+                                await env.editor.open(row: pending.row)
+                            }
+                        }
+                        Button("Discard Edits & Switch", role: .destructive) {
+                            Task { await env.editor.open(row: pending.row) }
+                        }
+                        Button("Cancel", role: .cancel) {
+                            if let previous = pending.previousId { model.selection = [previous] }
+                        }
+                    } message: { _ in
+                        Text("The audio editor has unsaved changes for “\(env.editor.source?.url.lastPathComponent ?? "the current file")”.")
                     }
             } else {
                 ProgressView()
