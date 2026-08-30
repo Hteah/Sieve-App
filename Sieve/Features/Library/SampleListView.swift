@@ -7,6 +7,12 @@ struct SampleListView: View {
     @AppStorage("autoPreview") private var autoPreview = true
     @State private var tableWidth: CGFloat = 900
     @State private var columnCustomization = TableColumnCustomization<SampleRow>()
+    @State private var convertRequest: ConvertRequest?
+
+    private struct ConvertRequest: Identifiable {
+        let id = UUID()
+        let rows: [SampleRow]
+    }
 
     // As the centre pane narrows, trailing columns drop off right-to-left until only the
     // waveform is left. Each pair is (customizationID, table width in pt at which it appears).
@@ -97,6 +103,11 @@ struct SampleListView: View {
                         let fav = !(rows.allSatisfy { $0.isFavorite == true })
                         Task { for r in rows { try? await AnnotationStore(database: env.database).setFavorite(fav, for: r) } }
                     }
+                    Divider()
+                    Button("Convert Sample Rate / Bit Depth…") {
+                        convertRequest = ConvertRequest(rows: rows)
+                    }
+                    .disabled(!rows.contains { $0.status == .present })
                 }
             } primaryAction: { ids in
                 if let id = ids.first, let row = model.rows.first(where: { $0.id == id }) { env.preview(row) }
@@ -115,6 +126,9 @@ struct SampleListView: View {
             .draggable(model.selection) // placeholder; per-row drag below
             .overlay {
                 if model.rows.isEmpty { emptyState }
+            }
+            .sheet(item: $convertRequest) { req in
+                BatchConvertSheet(model: model, rows: req.rows)
             }
             Divider()
             statusBar

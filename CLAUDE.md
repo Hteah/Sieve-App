@@ -6,7 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Sieve is a native SwiftUI macOS app (macOS 26, Swift 6 strict concurrency) that indexes a music producer's
 sample folders, shows amplitude-accurate waveforms, lets the user tag/rate/annotate samples, and finds exact
-duplicates. It never touches files on disk except for the explicit Trash/Move actions in the Duplicates view.
+duplicates. Indexing never touches files on disk; the only writes are explicit user actions — Trash/Move in the
+Duplicates view and "Convert Sample Rate / Bit Depth" on the list selection (`Audio/AudioConverter`, rewrites in place).
 
 ## Build, test, run
 
@@ -60,9 +61,13 @@ metadata + SHA-256 over PCM (`audioHash`; container-independent, so WAV/AIFF/ext
 
 **Sandbox rules:** all file access to a root goes through its bookmark; hold the scope on the *root* URL
 (`withSecurityScope` in `BookmarkStore.swift`) — child URLs only inherit while the root's scope is active.
-`AppEnvironment.rootURL(for:)` caches resolved root URLs. `FileOperator` (Duplicates) is the only code that
-modifies files; it re-verifies size/mtime against the index before acting, logs to `file_op_log`, and re-paths
-or marks `missing` afterwards. Its filesystem calls go through the `FileSystemOps` protocol so tests fake the Trash.
+`AppEnvironment.rootURL(for:)` caches resolved root URLs. Two code paths modify files: `FileOperator`
+(Duplicates) re-verifies size/mtime against the index before acting, logs to `file_op_log`, and re-paths or
+marks `missing` afterwards — its filesystem calls go through the `FileSystemOps` protocol so tests fake the
+Trash. `AudioConverter` (batch convert) writes a temp WAV, validates it (rate/channels/length), then replaces
+the original in place; a non-WAV source becomes a sibling `.wav` and the original is deleted. The converted
+audio gets a new content hash, so `BatchConvertSheet` calls `AnnotationStore.carryOverAnnotation` to copy
+rating/tags/notes onto the new hash and then rescans the affected roots.
 
 **Concurrency conventions:** `SWIFT_DEFAULT_ACTOR_ISOLATION` is `nonisolated`. AVFoundation objects
 (`AVAudioFile`, `AVAudioPCMBuffer`) never cross isolation boundaries — create and consume them in one actor/task

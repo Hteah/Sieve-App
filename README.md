@@ -11,6 +11,9 @@ A lightweight native macOS app for organizing music-production sample collection
   renamed or moved, and identical copies share it.
 - **Find exact duplicates** across packs (WAV vs AIFF vs re-tagged copies of the same audio all match). Choose
   which copy to keep, then trash or move the rest — with a confirmation sheet and an operations log.
+- **Batch convert** the selected rows' sample rate and bit depth (right-click → *Convert Sample Rate / Bit
+  Depth*). Rewrites the originals in place as WAV using a mastering-grade resampler; ratings/tags/notes are
+  carried across to the converted audio.
 - BPM/key are parsed from filenames (`_128bpm`, `Cmin`, `F#m`); audio-based detection is a later phase.
 
 ## Requirements
