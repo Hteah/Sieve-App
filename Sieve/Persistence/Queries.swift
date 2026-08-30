@@ -2,7 +2,7 @@ import Foundation
 import GRDB
 
 enum SampleSort: String, CaseIterable, Sendable, Identifiable {
-    case name, path, duration, size, modified, rating, peak
+    case name, path, duration, size, modified, rating, rate, bits
     var id: String { rawValue }
     var label: String {
         switch self {
@@ -12,19 +12,50 @@ enum SampleSort: String, CaseIterable, Sendable, Identifiable {
         case .size: "Size"
         case .modified: "Modified"
         case .rating: "Rating"
-        case .peak: "Peak level"
+        case .rate: "Sample rate"
+        case .bits: "Bit depth"
         }
     }
-    var sqlOrder: String {
+
+    /// Primary sort expression.
+    private var key: String {
         switch self {
-        case .name: "filename COLLATE NOCASE ASC, relativePath ASC"
-        case .path: "rootId ASC, relativePath COLLATE NOCASE ASC"
-        case .duration: "durationSec IS NULL, durationSec ASC"
-        case .size: "fileSize DESC"
-        case .modified: "modifiedAt DESC"
-        case .rating: "COALESCE(rating,0) DESC, filename COLLATE NOCASE ASC"
-        case .peak: "peakDb IS NULL, peakDb DESC"
+        case .name: "filename COLLATE NOCASE"
+        case .path: "relativePath COLLATE NOCASE"
+        case .duration: "durationSec"
+        case .size: "fileSize"
+        case .modified: "modifiedAt"
+        case .rating: "COALESCE(rating, 0)"
+        case .rate: "sampleRate"
+        case .bits: "bitDepth"
         }
+    }
+
+    /// Sorts whose column can be NULL — those rows sort last regardless of direction.
+    private var nullable: Bool {
+        switch self {
+        case .name, .path, .rating: false
+        case .duration, .size, .modified, .rate, .bits: true
+        }
+    }
+
+    /// The direction to snap to when the user first switches to this sort.
+    var defaultAscending: Bool {
+        switch self {
+        case .name, .path, .duration, .rate, .bits: true
+        case .size, .modified, .rating: false
+        }
+    }
+
+    func sqlOrder(ascending: Bool) -> String {
+        let dir = ascending ? "ASC" : "DESC"
+        var parts: [String] = []
+        if nullable { parts.append("\(key) IS NULL") }
+        parts.append("\(key) \(dir)")
+        if self != .name, self != .path {
+            parts.append("filename COLLATE NOCASE ASC, relativePath ASC")
+        }
+        return parts.joined(separator: ", ")
     }
 }
 
@@ -45,6 +76,13 @@ struct SampleFilter: Hashable, Sendable {
     var minRating: Int = 0
     var extensions: Set<String> = []
     var sort: SampleSort = .name
+    var sortAscending: Bool = true
+
+    /// Switch sort field and snap the direction to that field's natural default.
+    mutating func select(_ newSort: SampleSort) {
+        sort = newSort
+        sortAscending = newSort.defaultAscending
+    }
 }
 
 enum Queries {
@@ -91,7 +129,7 @@ enum Queries {
         }
 
         let whereClause: SQL = wheres.isEmpty ? "" : "WHERE " + wheres.joined(separator: " AND ")
-        let order = SQL(sql: "ORDER BY " + filter.sort.sqlOrder)
+        let order = SQL(sql: "ORDER BY " + filter.sort.sqlOrder(ascending: filter.sortAscending))
         return SQLRequest<SampleRow>(literal: """
             SELECT v.* FROM sample_with_annotation v \(joins) \(whereClause) \(order)
             """)

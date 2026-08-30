@@ -289,9 +289,25 @@ struct FilterBar: View {
     }
 
     private var sortPicker: some View {
-        Picker("Sort", selection: $model.filter.sort) {
-            ForEach(SampleSort.allCases) { Text($0.label).tag($0) }
+        HStack(spacing: 4) {
+            Picker("Sort", selection: sortBinding) {
+                ForEach(SampleSort.allCases) { Text($0.label).tag($0) }
+            }
+            .frame(width: 130)
+            Button {
+                model.filter.sortAscending.toggle()
+            } label: {
+                Image(systemName: model.filter.sortAscending ? "arrow.up" : "arrow.down")
+            }
+            .buttonStyle(.borderless)
+            .help(model.filter.sortAscending ? "Ascending — click to reverse" : "Descending — click to reverse")
         }
-        .frame(width: 150)
+    }
+
+    private var sortBinding: Binding<SampleSort> {
+        Binding(
+            get: { model.filter.sort },
+            set: { model.filter.select($0) }
+        )
     }
 }
