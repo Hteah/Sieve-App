@@ -140,6 +140,7 @@ struct AudioEditorView: View {
                 Image(systemName: session.player.isPlaying ? "stop.fill" : "play.fill")
             }
             .help(session.hasSelection ? "Play the selection" : "Play from the cursor")
+            .modifier(SpaceToToggle(enabled: isPopOut))
             Toggle(isOn: Binding(get: { session.looping }, set: { session.looping = $0 })) {
                 Image(systemName: "repeat")
             }
@@ -239,6 +240,21 @@ struct AudioEditorView: View {
         }
         .buttonStyle(.bordered)
         .controlSize(.small)
+    }
+}
+
+/// Binds the Space key to the Play/Stop button — only in the pop-out window, where there's no
+/// competing Space handler (the list's preview shortcut lives in the main window).
+private struct SpaceToToggle: ViewModifier {
+    let enabled: Bool
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if enabled {
+            content.keyboardShortcut(.space, modifiers: [])
+        } else {
+            content
+        }
     }
 }
 
