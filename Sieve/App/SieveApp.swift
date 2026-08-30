@@ -15,7 +15,7 @@ struct SieveApp: App {
         }
 
         Window("Audio Editor", id: "audio-editor") {
-            AudioEditorView(currentRow: nil, showsPopOutButton: false)
+            AudioEditorView(isPopOut: true)
                 .environment(env)
                 .frame(minWidth: 600, minHeight: 380)
         }

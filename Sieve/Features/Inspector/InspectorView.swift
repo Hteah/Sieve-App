@@ -2,6 +2,7 @@ import SwiftUI
 
 struct InspectorView: View {
     @Environment(AppEnvironment.self) private var env
+    @Environment(\.openWindow) private var openWindow
     @Bindable var model: LibraryViewModel
     @AppStorage("inspectorTab") private var tab = InspectorTab.info
 
@@ -29,7 +30,17 @@ struct InspectorView: View {
                                            description: Text("Select a sample to see details."))
                 }
             case .edit:
-                AudioEditorView(currentRow: model.primarySelection)
+                if env.editor.windowOpen {
+                    ContentUnavailableView {
+                        Label("Editing in a Separate Window", systemImage: "macwindow")
+                    } description: {
+                        Text("The audio editor is open in its own window.")
+                    } actions: {
+                        Button("Bring Editor to Front") { openWindow(id: "audio-editor") }
+                    }
+                } else {
+                    AudioEditorView(currentRow: model.primarySelection)
+                }
             }
         }
     }

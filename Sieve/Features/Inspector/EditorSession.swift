@@ -31,6 +31,8 @@ final class EditorSession {
     private(set) var isBusy = false
     private(set) var loadError: String?
     private(set) var clipboard: AudioClip?
+    /// True while the pop-out editor window is open; the inspector's Edit tab hides its editor then.
+    var windowOpen = false
 
     private var undo: [AudioClip] = []
     private var redo: [AudioClip] = []

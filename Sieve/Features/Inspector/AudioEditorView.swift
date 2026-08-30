@@ -9,7 +9,8 @@ struct AudioEditorView: View {
     /// The currently selected sample, so the Edit tab can load it on first appearance.
     /// `nil` in the pop-out window (which just shows whatever the session already has).
     var currentRow: SampleRow? = nil
-    var showsPopOutButton = true
+    /// True for the standalone editor window; the inspector's inline copy leaves this false.
+    var isPopOut = false
 
     @AppStorage("editorNormalizeDb") private var normalizeDb = -1.0
 
@@ -42,10 +43,14 @@ struct AudioEditorView: View {
         }
         .padding(10)
         .onAppear {
+            if isPopOut { session.windowOpen = true }
             session.retain(currentRow: currentRow)
             saveBits = session.source?.sourceBits ?? .int24
         }
-        .onDisappear { session.release() }
+        .onDisappear {
+            if isPopOut { session.windowOpen = false }
+            session.release()
+        }
         .onChange(of: session.source?.sampleId) { _, _ in
             saveBits = session.source?.sourceBits ?? saveBits
         }
@@ -74,7 +79,7 @@ struct AudioEditorView: View {
             }
             Spacer()
             if session.isBusy { ProgressView().controlSize(.small) }
-            if showsPopOutButton {
+            if !isPopOut {
                 Button { openWindow(id: "audio-editor") } label: {
                     Image(systemName: "macwindow.on.rectangle")
                 }
