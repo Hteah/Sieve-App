@@ -6,6 +6,7 @@ struct ContentView: View {
     @AppStorage("showInspector") private var showInspector = true
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @State private var pendingSwitch: PendingSwitch?
+    @State private var followTask: Task<Void, Never>?
 
     private struct PendingSwitch: Identifiable {
         let id = UUID()
@@ -32,12 +33,18 @@ struct ContentView: View {
                         }
                     }
                     .onChange(of: model.primarySelection?.id) { oldId, _ in
+                        followTask?.cancel()
                         guard env.editor.isActive, let row = model.primarySelection,
                               row.id != env.editor.source?.sampleId else { return }
                         if env.editor.isDirty {
                             pendingSwitch = PendingSwitch(row: row, previousId: oldId)
                         } else {
-                            Task { await env.editor.open(row: row) }
+                            // Debounce: only load into the editor once the user settles on a row.
+                            followTask = Task {
+                                try? await Task.sleep(for: .milliseconds(250))
+                                guard !Task.isCancelled, model.primarySelection?.id == row.id else { return }
+                                await env.editor.open(row: row)
+                            }
                         }
                     }
                     .confirmationDialog(

@@ -116,6 +116,36 @@ struct AudioClip: Sendable {
         }, sampleRate: sampleRate)
     }
 
+    /// Per-channel peak + RMS reduced to `buckets`, matching the shape stored in the DB — so the
+    /// list thumbnail can show live editor state without a rescan.
+    func thumbnailSummary(buckets: Int = WaveformSummary.thumbnailBuckets) -> WaveformSummary {
+        let chs = max(1, channelCount)
+        let b = max(1, buckets)
+        let n = frameCount
+        var peaks = Array(repeating: [Float](repeating: 0, count: b), count: chs)
+        var rms = Array(repeating: [Float](repeating: 0, count: b), count: chs)
+        guard n > 0 else { return WaveformSummary(bucketCount: b, channels: chs, peaks: peaks, rms: rms) }
+        let per = Double(n) / Double(b)
+        for c in 0..<channelCount {
+            let ch = channels[c]
+            for k in 0..<b {
+                let lo = min(n - 1, Int(Double(k) * per))
+                let hi = min(n, max(lo + 1, Int(Double(k + 1) * per)))
+                var pk: Float = 0
+                var sumSq = 0.0
+                for i in lo..<hi {
+                    let v = ch[i]
+                    let a = abs(v)
+                    if a > pk { pk = a }
+                    sumSq += Double(v) * Double(v)
+                }
+                peaks[c][k] = pk
+                rms[c][k] = Float((sumSq / Double(hi - lo)).squareRoot())
+            }
+        }
+        return WaveformSummary(bucketCount: b, channels: chs, peaks: peaks, rms: rms)
+    }
+
     /// Mixes to `target` channels and linearly resamples to `rate`. Linear interpolation is fine
     /// for the occasional paste across mismatched formats.
     func conformed(toRate rate: Double, channelCount target: Int) -> AudioClip {

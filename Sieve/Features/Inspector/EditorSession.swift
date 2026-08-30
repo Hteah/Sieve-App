@@ -25,6 +25,7 @@ final class EditorSession {
     private(set) var source: Source?
     private(set) var clip: AudioClip?
     private(set) var mip: PeakMip?
+    private(set) var thumbnail: WaveformSummary?
     var selection: Range<Int>?
     var looping = false
     private(set) var isBusy = false
@@ -43,7 +44,7 @@ final class EditorSession {
 
     init(env: AppEnvironment) { self.env = env }
 
-    private enum LoadOutcome: Sendable { case clip(AudioClip); case failure(String) }
+    private enum LoadOutcome: Sendable { case loaded(AudioClip, PeakMip, WaveformSummary); case failure(String) }
     private enum WriteOutcome: Sendable { case url(URL); case ok; case failure(String) }
 
     private nonisolated static func describe(_ error: Error) -> String {
@@ -118,36 +119,60 @@ final class EditorSession {
         isBusy = true
         let outcome = await Self.loadClip(url: fileURL, rootURL: rootURL, maxFrames: Self.maxFrames)
         isBusy = false
+        guard source?.sampleId == src.sampleId else { return }   // selection moved on while we loaded
         switch outcome {
-        case .clip(let c):
+        case .loaded(let c, let m, let t):
             clip = c
-            mip = PeakMip(c)
+            mip = m
+            thumbnail = t
         case .failure(let message):
-            clip = nil; mip = nil
+            clip = nil; mip = nil; thumbnail = nil
             loadError = message
-        default:
-            break
         }
     }
 
-    /// Reads a file into a clip while holding the root's security scope. `rootURL` scope is
-    /// process-wide, so acquiring it here and releasing after the detached read is safe.
+    /// Reads a file into a clip (and builds its zoom pyramid) off the main actor, while holding
+    /// the root's security scope. `rootURL` scope is process-wide, so acquiring it here and
+    /// releasing after the detached work is safe.
     private static func loadClip(url: URL, rootURL: URL, maxFrames: Int) async -> LoadOutcome {
         let scoped = rootURL.startAccessingSecurityScopedResource()
         defer { if scoped { rootURL.stopAccessingSecurityScopedResource() } }
         return await Task.detached(priority: .userInitiated) {
-            do { return .clip(try AudioFileIO.load(url: url, maxFrames: maxFrames)) }
-            catch { return .failure(describe(error)) }
+            do {
+                let clip = try AudioFileIO.load(url: url, maxFrames: maxFrames)
+                return .loaded(clip, PeakMip(clip), clip.thumbnailSummary())
+            } catch {
+                return .failure(describe(error))
+            }
         }.value
     }
 
     /// Drops the clip and any edits (used when switching away after the user chose "Discard").
     func discard() {
         player.stop()
-        clip = nil; mip = nil; source = nil; selection = nil
+        clip = nil; mip = nil; thumbnail = nil; source = nil; selection = nil
         undo.removeAll(); redo.removeAll(); undoBytes = 0
         editSerial = 0; savedSerial = 0
         loadError = nil
+    }
+
+    // MARK: Mirror to the list
+
+    /// Live thumbnail for `sampleId` while it's the dirty file open in the editor — so the list
+    /// row's waveform reflects unsaved edits without a rescan.
+    func liveThumbnail(for sampleId: Int64) -> WaveformSummary? {
+        guard isDirty, source?.sampleId == sampleId else { return nil }
+        return thumbnail
+    }
+
+    /// The sample the editor is currently playing, if any (for the list row's playing indicator).
+    var playingSampleId: Int64? {
+        (player.isPlaying && source != nil) ? source?.sampleId : nil
+    }
+
+    var playheadFraction: Double? {
+        guard player.isPlaying, frameCount > 0 else { return nil }
+        return Double(player.playheadFrame) / Double(frameCount)
     }
 
     func revert() async {
@@ -159,9 +184,8 @@ final class EditorSession {
         let outcome = await Self.loadClip(url: src.url, rootURL: src.rootURL, maxFrames: Self.maxFrames)
         isBusy = false
         switch outcome {
-        case .clip(let c): clip = c; mip = PeakMip(c); loadError = nil
+        case .loaded(let c, let m, let t): clip = c; mip = m; thumbnail = t; loadError = nil
         case .failure(let message): loadError = message
-        default: break
         }
     }
 
@@ -230,8 +254,8 @@ final class EditorSession {
         undoBytes -= Self.bytes(prev)
         editSerial += 1
         clip = prev
-        mip = PeakMip(prev)
         selection = selection.flatMap { Self.clamp($0, count: prev.frameCount) }
+        rebuildMip(for: prev)
     }
 
     func redoEdit() {
@@ -239,8 +263,8 @@ final class EditorSession {
         undo.append(cur); undoBytes += Self.bytes(cur)
         editSerial += 1
         clip = next
-        mip = PeakMip(next)
         selection = selection.flatMap { Self.clamp($0, count: next.frameCount) }
+        rebuildMip(for: next)
     }
 
     func selectAll() {
@@ -364,8 +388,23 @@ final class EditorSession {
         redo.removeAll()
         editSerial += 1
         clip = next
-        mip = PeakMip(next)
         selection = newSelection(edited).flatMap { Self.clamp($0, count: next.frameCount) }
+        rebuildMip(for: next)
+    }
+
+    /// Rebuilds the zoom pyramid and list thumbnail off the main actor; the editor waveform falls
+    /// back to raw scanning (`mip == nil`) for the frame or two until they land.
+    private func rebuildMip(for clip: AudioClip) {
+        let serial = editSerial
+        mip = nil
+        Task {
+            let built = await Task.detached(priority: .userInitiated) {
+                (PeakMip(clip), clip.thumbnailSummary())
+            }.value
+            guard editSerial == serial else { return }
+            mip = built.0
+            thumbnail = built.1
+        }
     }
 
     private func pushUndo(_ c: AudioClip) {

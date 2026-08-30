@@ -91,6 +91,14 @@ struct AudioClipTests {
         #expect(c.frameCount == 60)
     }
 
+    @Test func thumbnailSummaryHasShapeAndTracksAmplitude() {
+        let summary = clip(frames: 4096, channels: 2) { _ in 0.5 }.thumbnailSummary(buckets: 128)
+        #expect(summary.bucketCount == 128)
+        #expect(summary.channels == 2)
+        #expect(summary.peaks[0].allSatisfy { abs($0 - 0.5) < 0.01 })
+        #expect(summary.rms[1].allSatisfy { abs($0 - 0.5) < 0.01 })
+    }
+
     @Test func peakMipShrinksAndTracksExtremes() {
         let mip = PeakMip(clip(frames: 10_000) { $0 == 5_000 ? 1.0 : 0.1 }, base: 256, levelCount: 4)
         #expect(!mip.levels.isEmpty)

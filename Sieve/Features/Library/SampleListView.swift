@@ -44,7 +44,8 @@ struct SampleListView: View {
                 TableColumn("Name") { row in
                     VStack(alignment: .leading, spacing: 2) {
                         HStack(spacing: 4) {
-                            if env.player.currentSampleId == row.id && env.player.isPlaying {
+                            if (env.player.currentSampleId == row.id && env.player.isPlaying)
+                                || env.editor.playingSampleId == row.id {
                                 Image(systemName: "speaker.wave.2.fill").foregroundStyle(.tint).font(.caption)
                             }
                             Text(row.filename).lineLimit(1)
@@ -225,9 +226,17 @@ struct WaveformCell: View {
     var onSeek: ((Double) -> Void)? = nil
 
     var body: some View {
-        let summary = env.waveformCache.summary(id: row.id, data: row.waveform)
-        let playhead: Double? = (env.player.currentSampleId == row.id && env.player.duration > 0)
-            ? env.player.position / env.player.duration : nil
+        // Mirror the editor: if this row is the dirty file open in the editor, show its live
+        // waveform and playhead instead of the indexed blob / preview player.
+        let summary = env.editor.liveThumbnail(for: row.id)
+            ?? env.waveformCache.summary(id: row.id, data: row.waveform)
+        let playhead: Double? = {
+            if env.player.currentSampleId == row.id, env.player.duration > 0 {
+                return env.player.position / env.player.duration
+            }
+            if env.editor.playingSampleId == row.id { return env.editor.playheadFraction }
+            return nil
+        }()
         GeometryReader { geo in
             WaveformView(summary: summary, playhead: playhead) { x in
                 onSeek?(max(0, min(1, x / max(1, geo.size.width))))

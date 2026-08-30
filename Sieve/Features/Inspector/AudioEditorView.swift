@@ -13,7 +13,6 @@ struct AudioEditorView: View {
 
     @AppStorage("editorNormalizeDb") private var normalizeDb = -1.0
 
-    @State private var zoom: Double = 1
     @State private var saveBits: BitDepthOption = .int24
     @State private var amplifyDb = 0.0
     @State private var preventClip = true
@@ -101,10 +100,21 @@ struct AudioEditorView: View {
             clip: session.clip ?? AudioClip(channels: [], sampleRate: 44_100),
             mip: session.mip,
             selection: Binding(get: { session.selection }, set: { session.selection = $0 }),
-            zoom: $zoom,
-            playheadFrame: session.player.isPlaying ? session.player.playheadFrame : nil
+            playheadFrame: mirroredPlayhead,
+            resetToken: session.source?.sampleId
         )
         .frame(minHeight: 130, maxHeight: .infinity)
+    }
+
+    /// The editor's own playhead, or — if the list preview is playing this same file — the
+    /// preview player's position, so playback started from the list shows here too.
+    private var mirroredPlayhead: Int? {
+        if session.player.isPlaying { return session.player.playheadFrame }
+        if env.player.currentSampleId == session.source?.sampleId, env.player.isPlaying,
+           env.player.duration > 0, session.frameCount > 0 {
+            return Int(env.player.position / env.player.duration * Double(session.frameCount))
+        }
+        return nil
     }
 
     private var transport: some View {
@@ -124,11 +134,7 @@ struct AudioEditorView: View {
 
             Spacer()
 
-            Button { zoom = max(1, zoom / 2) } label: { Image(systemName: "minus.magnifyingglass") }
-                .disabled(zoom <= 1)
-            Button("Fit") { zoom = 1 }
-            Button { zoom = min(64, zoom * 2) } label: { Image(systemName: "plus.magnifyingglass") }
-                .disabled(zoom >= 64)
+            Text("Scroll to zoom · drag to select").font(.caption2).foregroundStyle(.tertiary)
         }
         .buttonStyle(.bordered)
         .controlSize(.small)
