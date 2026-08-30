@@ -20,7 +20,6 @@ struct SieveApp: App {
                 .frame(minWidth: 600, minHeight: 380)
         }
         .defaultSize(width: 1040, height: 560)
-        .windowLevel(.floating)   // keep the editor above other windows, including other apps
 
         Settings {
             SettingsView()

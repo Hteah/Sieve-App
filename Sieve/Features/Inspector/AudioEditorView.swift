@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// The audio editor UI. Rendered both in the inspector's Edit tab and, at a larger size, in the
@@ -13,6 +14,7 @@ struct AudioEditorView: View {
     var isPopOut = false
 
     @AppStorage("editorNormalizeDb") private var normalizeDb = -1.0
+    @AppStorage("editorFloatOnTop") private var floatOnTop = true
 
     @State private var saveBits: BitDepthOption = .int24
     @State private var amplifyDb = 0.0
@@ -42,6 +44,9 @@ struct AudioEditorView: View {
             }
         }
         .padding(10)
+        .background {
+            if isPopOut { WindowLevelSetter(level: floatOnTop ? .floating : .normal) }
+        }
         .onAppear {
             if isPopOut { session.windowOpen = true }
             session.retain(currentRow: currentRow)
@@ -79,7 +84,13 @@ struct AudioEditorView: View {
             }
             Spacer()
             if session.isBusy { ProgressView().controlSize(.small) }
-            if !isPopOut {
+            if isPopOut {
+                Button { floatOnTop.toggle() } label: {
+                    Image(systemName: floatOnTop ? "pin.fill" : "pin")
+                }
+                .help(floatOnTop ? "Floating above other windows — click to stop"
+                                 : "Click to keep this window above others")
+            } else {
                 Button { openWindow(id: "audio-editor") } label: {
                     Image(systemName: "macwindow.on.rectangle")
                 }
@@ -226,5 +237,17 @@ struct AudioEditorView: View {
         }
         .buttonStyle(.bordered)
         .controlSize(.small)
+    }
+}
+
+/// Sets the hosting window's level (e.g. `.floating` to keep it above other windows).
+private struct WindowLevelSetter: NSViewRepresentable {
+    var level: NSWindow.Level
+
+    func makeNSView(context: Context) -> NSView { NSView() }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        let level = level
+        DispatchQueue.main.async { nsView.window?.level = level }
     }
 }
