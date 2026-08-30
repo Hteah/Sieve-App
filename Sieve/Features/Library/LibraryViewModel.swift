@@ -14,6 +14,10 @@ final class LibraryViewModel {
     var filter = SampleFilter() {
         didSet {
             guard filter != oldValue else { return }
+            // Kept as a separate observable flag so a sort/search/rating change to `filter`
+            // doesn't invalidate ContentView (which only cares whether the duplicates view is up).
+            let dup = filter.scope == .duplicates
+            if showsDuplicates != dup { showsDuplicates = dup }
             // A pure sort change (field or direction) just reorders the rows already in memory —
             // no need to tear down the observation and re-decode the whole table from SQLite.
             if filter.samePredicate(as: oldValue) {
@@ -23,6 +27,7 @@ final class LibraryViewModel {
             }
         }
     }
+    private(set) var showsDuplicates = false
     private(set) var rows: [SampleRow] = []
     private(set) var roots: [Root] = []
     private(set) var folderTrees: [Int64: [Queries.FolderNode]] = [:]

@@ -94,4 +94,39 @@ struct SampleRow: Codable, Identifiable, Hashable, Sendable, FetchableRecord {
         guard let tagNames, !tagNames.isEmpty else { return [] }
         return tagNames.split(separator: "\u{1F}").map(String.init)
     }
+
+    // Equality/hashing skip the multi-KB `waveform` blob (compare its size instead) and the
+    // 64-char hash strings. SwiftUI's Table calls `==` per row while diffing a re-sorted list,
+    // and byte-comparing every row's waveform there is what made sorting large lists stall.
+    static func == (lhs: SampleRow, rhs: SampleRow) -> Bool {
+        lhs.id == rhs.id
+            && lhs.status == rhs.status
+            && lhs.rating == rhs.rating
+            && lhs.isFavorite == rhs.isFavorite
+            && lhs.tagNames == rhs.tagNames
+            && lhs.filename == rhs.filename
+            && lhs.parentDir == rhs.parentDir
+            && lhs.relativePath == rhs.relativePath
+            && lhs.rootId == rhs.rootId
+            && lhs.fileSize == rhs.fileSize
+            && lhs.modifiedAt == rhs.modifiedAt
+            && lhs.durationSec == rhs.durationSec
+            && lhs.sampleRate == rhs.sampleRate
+            && lhs.bitDepth == rhs.bitDepth
+            && lhs.channels == rhs.channels
+            && lhs.formatName == rhs.formatName
+            && lhs.peakDb == rhs.peakDb
+            && lhs.rmsDb == rhs.rmsDb
+            && lhs.clippedSamples == rhs.clippedSamples
+            && lhs.bpm == rhs.bpm
+            && lhs.musicalKey == rhs.musicalKey
+            && lhs.waveform?.count == rhs.waveform?.count
+    }
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+        hasher.combine(modifiedAt)
+        hasher.combine(rating)
+        hasher.combine(tagNames)
+    }
 }

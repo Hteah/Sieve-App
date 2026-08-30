@@ -67,7 +67,7 @@ struct ContentView: View {
 
     private func centerPane(_ model: LibraryViewModel) -> some View {
         Group {
-            if model.filter.scope == .duplicates {
+            if model.showsDuplicates {
                 DuplicateGroupsView(model: model)
             } else {
                 SampleListView(model: model)
