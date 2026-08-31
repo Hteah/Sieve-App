@@ -175,8 +175,22 @@ struct SampleListView: View {
                 if let id = ids.first, let row = model.rows.first(where: { $0.id == id }) { env.preview(row) }
             }
             .onKeyPress(.space) {
-                if let row = model.primarySelection { env.togglePreview(row); return .handled }
-                return .ignored
+                // Stop wins: Space halts any running preview regardless of which row is
+                // selected. Only when nothing is playing does it start the selected row —
+                // a plain play/stop toggle, like the wave editor.
+                if env.player.isPlaying {
+                    env.player.stop()
+                } else if let row = model.primarySelection {
+                    env.togglePreview(row)
+                } else {
+                    return .ignored
+                }
+                return .handled
+            }
+            .onKeyPress(.escape) {
+                guard env.player.isPlaying else { return .ignored }
+                env.player.stop()
+                return .handled
             }
             .onChange(of: model.selection) { _, new in
                 guard autoPreview, new.count == 1, let row = model.primarySelection, row.status == .present else { return }
