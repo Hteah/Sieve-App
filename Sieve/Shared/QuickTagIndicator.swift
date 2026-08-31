@@ -1,8 +1,8 @@
 import SwiftUI
 
-/// Row indicator: the glyph + name for each Quick Tag a sample carries (`⚡ Kicks, 〰 Bass`),
-/// or a dim dash when it has none. Read-only — assignment happens through the menu (list) or the
-/// chips (inspector).
+/// Row indicator: just the glyph for each Quick Tag a sample carries (`⚡ 〰`), or a dim dash when it
+/// has none. Names are carried in a hover tooltip and the accessibility label. Read-only —
+/// assignment happens through the menu (list) or the chips (inspector).
 struct QuickTagIndicator: View {
     var mask: Int
     var slots: [QuickTag]
@@ -12,19 +12,16 @@ struct QuickTagIndicator: View {
             Text("—").foregroundStyle(.tertiary)
         } else {
             let set = (0..<QuickTags.count).filter { QuickTags.isSet(mask, $0) }
+            let names = set.map { QuickTags.displayName(slots, $0) }.joined(separator: ", ")
             HStack(spacing: 6) {
-                ForEach(Array(set.enumerated()), id: \.element) { idx, i in
-                    HStack(spacing: 3) {
-                        Image(systemName: QuickTags.symbolName(slots, i))
-                            .imageScale(.small)
-                            .foregroundStyle(.tint)
-                        Text(QuickTags.displayName(slots, i)).lineLimit(1)
-                    }
-                    if idx < set.count - 1 {
-                        Text(",").foregroundStyle(.secondary)
-                    }
+                ForEach(set, id: \.self) { i in
+                    Image(systemName: QuickTags.symbolName(slots, i))
+                        .imageScale(.medium)
+                        .foregroundStyle(.tint)
                 }
             }
+            .help(names)
+            .accessibilityLabel(names)
         }
     }
 }

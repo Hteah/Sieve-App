@@ -105,7 +105,7 @@ struct SampleListView: View {
                     .menuStyle(.borderlessButton)
                     .menuIndicator(.hidden)
                 }
-                .width(min: 80, ideal: 170).customizationID("quickTag")
+                .width(min: 60, ideal: 96).customizationID("quickTag")
                 TableColumn("Tags") { row in
                     Text(row.tags.joined(separator: ", ")).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 }
