@@ -80,7 +80,7 @@ enum AppTheme: String, CaseIterable, Identifiable {
 }
 
 enum AppAppearance: String, CaseIterable, Identifiable {
-    case system, light, dark
+    case system, light, dark, industrial
 
     var id: String { rawValue }
     var label: String {
@@ -88,13 +88,22 @@ enum AppAppearance: String, CaseIterable, Identifiable {
         case .system: "System"
         case .light: "Light"
         case .dark: "Dark"
+        case .industrial: "Industrial Grey"
         }
     }
     var colorScheme: ColorScheme? {
         switch self {
         case .system: nil
         case .light: .light
-        case .dark: .dark
+        case .dark, .industrial: .dark
+        }
+    }
+
+    /// A screen-wide colour wash layered over the base scheme (nil = none).
+    var wash: (color: Color, opacity: Double)? {
+        switch self {
+        case .industrial: (Color(.sRGB, red: 0.36, green: 0.38, blue: 0.42, opacity: 1), 0.22)
+        default: nil
         }
     }
 }
@@ -111,8 +120,18 @@ struct Themed: ViewModifier {
         content
             .tint(theme.accent)   // nil = no override
             .preferredColorScheme(appearance.colorScheme)
-            // A dim/brighten wash as an overlay — a `.brightness()` filter on the whole
-            // window breaks the NavigationSplitView + toolbar safe-area layout.
+            // Washes are overlays, not `.brightness()` filters — a filter on the whole window
+            // breaks the NavigationSplitView + toolbar safe-area layout.
+            .overlay {
+                if let wash = appearance.wash {
+                    Rectangle()
+                        .fill(wash.color)
+                        .opacity(wash.opacity)
+                        .blendMode(.plusLighter)
+                        .allowsHitTesting(false)
+                        .ignoresSafeArea()
+                }
+            }
             .overlay {
                 if brightness != 0 {
                     Rectangle()
