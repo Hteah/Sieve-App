@@ -1,0 +1,20 @@
+// Code signing for the Sieve app target.
+//
+// Default is ad-hoc ("-"), so a fresh clone and CI build with zero setup.
+//
+// To sign with a real Apple identity instead — which lets the macOS
+// security-scoped bookmarks Sieve stores for your sample folders keep working
+// across rebuilds — drop an untracked Signing.local.xcconfig beside this file:
+//
+//     CODE_SIGN_STYLE    = Manual
+//     CODE_SIGN_IDENTITY = Apple Development
+//     DEVELOPMENT_TEAM   = ABCDE12345
+//
+// Signing.local.xcconfig is in .gitignore. CLI builds that sign with a real
+// identity also need ENABLE_PREVIEWS=NO (the preview dylib won't sign).
+
+CODE_SIGN_STYLE = Manual
+CODE_SIGN_IDENTITY = -
+DEVELOPMENT_TEAM =
+
+#include? "Signing.local.xcconfig"

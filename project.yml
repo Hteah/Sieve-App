@@ -16,14 +16,16 @@ settings:
     SWIFT_STRICT_CONCURRENCY: complete
     SWIFT_DEFAULT_ACTOR_ISOLATION: nonisolated
     ENABLE_HARDENED_RUNTIME: YES
-    CODE_SIGN_IDENTITY: "-"
-    CODE_SIGN_STYLE: Manual
-    DEVELOPMENT_TEAM: ""
     MACOSX_DEPLOYMENT_TARGET: "26.0"
 targets:
   Sieve:
     type: application
     platform: macOS
+    # Signing lives in Signing.xcconfig (ad-hoc by default; drop in a local
+    # Signing.local.xcconfig to sign with a real identity — see that file).
+    configFiles:
+      Debug: Signing.xcconfig
+      Release: Signing.xcconfig
     sources:
       - path: Sieve
         excludes:

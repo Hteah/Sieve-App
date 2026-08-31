@@ -38,6 +38,22 @@ open build/Build/Products/Debug/Sieve.app
 
 Then **File → Add Folder…** (⌘O) and pick a sample folder. **⌘R** rescans everything.
 
+### Signing (optional but recommended for daily use)
+
+Builds are **ad-hoc signed** by default (`Signing.xcconfig`). macOS ties a security-scoped
+bookmark to the exact code signature, so every ad-hoc rebuild invalidates the folders you've
+granted access to — you re-add them after each build. To avoid that, sign with a real identity:
+create `Signing.local.xcconfig` (git-ignored) beside `Signing.xcconfig`:
+
+```
+CODE_SIGN_STYLE    = Manual
+CODE_SIGN_IDENTITY = Apple Development
+DEVELOPMENT_TEAM   = <your 10-char team ID>       # security find-identity -v -p codesigning → cert OU
+```
+
+Then `xcodegen generate` and build. CLI builds that sign this way also need `ENABLE_PREVIEWS=NO`.
+The first build shows a one-time keychain prompt — choose **Always Allow**.
+
 ## Tests
 
 ```bash
