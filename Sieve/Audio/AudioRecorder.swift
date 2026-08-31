@@ -67,7 +67,7 @@ final class AudioRecorder {
             await self?.writerFinished(url: dest)
         }
 
-        engine.inputNode.installTap(onBus: 0, bufferSize: 4096, format: format) { [levelBox, cont] buffer, _ in
+        engine.inputNode.installTap(onBus: 0, bufferSize: 4096, format: format) { @Sendable [levelBox, cont] buffer, _ in
             guard let data = buffer.floatChannelData, buffer.frameLength > 0 else { return }
             let n = Int(buffer.frameLength)
             let ch = Int(buffer.format.channelCount)
