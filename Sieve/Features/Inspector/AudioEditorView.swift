@@ -125,9 +125,7 @@ struct AudioEditorView: View {
             selection: Binding(get: { session.selection }, set: { session.selection = $0 }),
             playheadFrame: mirroredPlayhead,
             onClickSeek: { session.setCursor($0) },
-            onSelectionCommitted: {                              // audition the new selection
-                if !session.recorder.isRecording { session.startPlayback() }
-            },
+            onSelectionCommitted: { session.startPlayback() },   // jump playback to the new selection
             resetToken: session.source?.sampleId
         )
         .frame(minHeight: 130, maxHeight: .infinity)
