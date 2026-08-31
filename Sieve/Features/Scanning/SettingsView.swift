@@ -9,9 +9,12 @@ struct SettingsView: View {
     @AppStorage("appTheme") private var themeRaw = AppTheme.system.rawValue
     @AppStorage("appAppearance") private var appearanceRaw = AppAppearance.system.rawValue
     @AppStorage("appBrightness") private var brightness = 0.0
+    @AppStorage(QuickTags.storageKey) private var quickTagSlotsJSON = ""
     @Environment(AppEnvironment.self) private var env
     @State private var recordingsFolder: URL?
     @State private var exportFolder: URL?
+    @State private var quickTagSlots: [QuickTag] = QuickTags.defaults
+    @State private var iconPickerSlot: Int?
 
     var body: some View {
         Form {
@@ -30,6 +33,33 @@ struct SettingsView: View {
                     Button("Reset") { brightness = 0 }.controlSize(.small).disabled(brightness == 0)
                 }
             }
+
+            Divider()
+
+            LabeledContent("Quick Tags") {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(0..<QuickTags.count, id: \.self) { i in
+                        HStack(spacing: 6) {
+                            Button {
+                                iconPickerSlot = i
+                            } label: {
+                                Image(systemName: QuickTags.symbolName(quickTagSlots, i))
+                                    .frame(width: 22, height: 22)
+                                    .background(Color.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 5))
+                            }
+                            .buttonStyle(.plain)
+                            .help("Choose an icon")
+                            TextField("Name", text: nameBinding(i))
+                                .textFieldStyle(.roundedBorder)
+                        }
+                    }
+                    Button("Reset to defaults") { setSlots(QuickTags.defaults) }
+                        .controlSize(.small)
+                        .disabled(quickTagSlots == QuickTags.defaults)
+                }
+            }
+            Text("Tag samples with these six quick tags from the list, the inspector, or by dragging onto one in the sidebar.")
+                .font(.caption).foregroundStyle(.secondary)
 
             Divider()
 
@@ -112,7 +142,36 @@ struct SettingsView: View {
         .onAppear {
             recordingsFolder = env.bookmarks.lastRecordingsFolder()
             exportFolder = env.bookmarks.lastExportFolder()
+            quickTagSlots = QuickTags.load(quickTagSlotsJSON)
         }
+        .onChange(of: quickTagSlotsJSON) { _, new in
+            let loaded = QuickTags.load(new)
+            if loaded != quickTagSlots { quickTagSlots = loaded }
+        }
+        .sheet(isPresented: Binding(get: { iconPickerSlot != nil }, set: { if !$0 { iconPickerSlot = nil } })) {
+            if let slot = iconPickerSlot {
+                SymbolGridPicker(
+                    title: "Icon for \(QuickTags.displayName(quickTagSlots, slot))",
+                    selected: QuickTags.symbolName(quickTagSlots, slot)
+                ) { symbol in
+                    var s = quickTagSlots
+                    s[slot].symbol = symbol
+                    setSlots(s)
+                }
+            }
+        }
+    }
+
+    private func setSlots(_ slots: [QuickTag]) {
+        quickTagSlots = slots
+        quickTagSlotsJSON = QuickTags.encode(slots)
+    }
+
+    private func nameBinding(_ i: Int) -> Binding<String> {
+        Binding(
+            get: { quickTagSlots.indices.contains(i) ? quickTagSlots[i].name : "" },
+            set: { var s = quickTagSlots; s[i].name = $0; setSlots(s) }
+        )
     }
 
     @ViewBuilder

@@ -52,6 +52,7 @@ struct SampleInspector: View {
     let selectionCount: Int
     let selectedRows: [SampleRow]
 
+    @AppStorage(QuickTags.storageKey) private var quickTagSlotsJSON = ""
     @State private var fullWaveform: WaveformSummary?
     @State private var zoom: Double = 1
     @State private var notes = ""
@@ -72,6 +73,7 @@ struct SampleInspector: View {
                 Divider()
                 actionButtons
                 ratingRow
+                quickTagRow
                 tagsSection
                 notesSection
                 Divider()
@@ -196,6 +198,31 @@ struct SampleInspector: View {
                     .foregroundStyle(row.isFavorite == true ? .pink : .secondary)
             }
             .buttonStyle(.plain)
+        }
+    }
+
+    private var quickTagRow: some View {
+        let slots = QuickTags.load(quickTagSlotsJSON)
+        let mask = row.quickTags ?? 0
+        return VStack(alignment: .leading, spacing: 6) {
+            Text("Quick Tags").font(.caption).foregroundStyle(.secondary)
+            FlowLayout(spacing: 6) {
+                ForEach(0..<QuickTags.count, id: \.self) { i in
+                    let on = QuickTags.isSet(mask, i)
+                    Button {
+                        let targets = selectionCount > 1 ? selectedRows : [row]
+                        Task { try? await store.toggleQuickTag(i, for: targets) }
+                    } label: {
+                        Label(QuickTags.displayName(slots, i), systemImage: QuickTags.symbolName(slots, i))
+                            .font(.caption)
+                            .padding(.horizontal, 8).padding(.vertical, 3)
+                            .background(on ? Color.accentColor.opacity(0.22) : Color.secondary.opacity(0.1), in: Capsule())
+                            .overlay(Capsule().strokeBorder(on ? Color.accentColor.opacity(0.7) : .clear, lineWidth: 1))
+                            .contentShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
         }
     }
 

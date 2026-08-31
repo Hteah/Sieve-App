@@ -28,6 +28,8 @@ struct Annotation: Codable, Identifiable, Hashable, Sendable, FetchableRecord, M
     var rating: Int
     var isFavorite: Bool
     var notes: String
+    /// 6-bit mask of applied Quick Tags (bit i ⇒ slot i). See `QuickTags`.
+    var quickTags: Int
     var updatedAt: Date
 
     init(contentHash: String?, rootId: Int64?, relativePath: String?) {
@@ -37,6 +39,7 @@ struct Annotation: Codable, Identifiable, Hashable, Sendable, FetchableRecord, M
         self.rating = 0
         self.isFavorite = false
         self.notes = ""
+        self.quickTags = 0
         self.updatedAt = Date()
     }
 

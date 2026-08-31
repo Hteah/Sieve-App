@@ -83,7 +83,7 @@ struct AudioConverterTests {
                             ext: "wav", fileSize: 1, modifiedAt: .init(), audioHash: "OLD", fileHash: nil,
                             durationSec: 1, sampleRate: 96_000, channels: 2, bitDepth: 24, formatName: "WAV PCM",
                             bpm: nil, musicalKey: nil, waveform: nil, peakDb: nil, rmsDb: nil, clippedSamples: nil,
-                            status: .present, rating: nil, isFavorite: nil, tagNames: nil)
+                            status: .present, rating: nil, isFavorite: nil, quickTags: nil, tagNames: nil)
         try await store.setRating(4, for: old)
         try await store.addTag(named: "kick", to: [old])
 
@@ -93,7 +93,7 @@ struct AudioConverterTests {
                               ext: "wav", fileSize: 1, modifiedAt: .init(), audioHash: "NEW", fileHash: nil,
                               durationSec: 1, sampleRate: 48_000, channels: 2, bitDepth: 16, formatName: "WAV PCM",
                               bpm: nil, musicalKey: nil, waveform: nil, peakDb: nil, rmsDb: nil, clippedSamples: nil,
-                              status: .present, rating: nil, isFavorite: nil, tagNames: nil)
+                              status: .present, rating: nil, isFavorite: nil, quickTags: nil, tagNames: nil)
         let annotation = try await db.reader.read { try Queries.annotation(db: $0, for: moved, create: false) }
         #expect(annotation?.rating == 4)
         let tagCount = try await db.reader.read { db in

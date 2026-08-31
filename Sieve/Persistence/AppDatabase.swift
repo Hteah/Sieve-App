@@ -166,6 +166,27 @@ final class AppDatabase: Sendable {
             try db.create(index: "root_groupId", on: "root", columns: ["groupId"])
         }
 
+        m.registerMigration("v3-quick-tags") { db in
+            try db.alter(table: "annotation") { t in
+                t.add(column: "quickTags", .integer).notNull().defaults(to: 0)
+            }
+            try db.execute(sql: "DROP VIEW sample_with_annotation")
+            try db.execute(sql: """
+                CREATE VIEW sample_with_annotation AS
+                SELECT s.*, a.id AS annotationId, a.rating AS rating, a.isFavorite AS isFavorite,
+                       a.quickTags AS quickTags,
+                       (SELECT group_concat(t.name, char(31))
+                          FROM annotation_tag at JOIN tag t ON t.id = at.tagId
+                         WHERE at.annotationId = a.id) AS tagNames
+                FROM sample s
+                LEFT JOIN annotation a
+                  ON (s.audioHash IS NOT NULL AND a.contentHash = s.audioHash)
+                  OR (s.audioHash IS NULL AND s.fileHash IS NOT NULL AND a.contentHash = s.fileHash)
+                  OR (s.audioHash IS NULL AND s.fileHash IS NULL AND a.contentHash IS NULL
+                      AND a.rootId = s.rootId AND a.relativePath = s.relativePath)
+                """)
+        }
+
         return m
     }
 }

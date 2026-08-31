@@ -6,6 +6,7 @@ struct SampleListView: View {
     @Environment(\.openWindow) private var openWindow
     @Bindable var model: LibraryViewModel
     @AppStorage("autoPreview") private var autoPreview = true
+    @AppStorage(QuickTags.storageKey) private var quickTagSlotsJSON = ""
     @State private var tableWidth: CGFloat = 900
     @State private var columnCustomization = TableColumnCustomization<SampleRow>()
     @State private var convertRequest: ConvertRequest?
@@ -23,8 +24,9 @@ struct SampleListView: View {
         ("rate", 430),
         ("bits", 470),
         ("rating", 560),
-        ("tags", 680),
-        ("size", 780),
+        ("quickTag", 610),
+        ("tags", 760),
+        ("size", 860),
     ]
 
     var body: some View {
@@ -80,6 +82,30 @@ struct SampleListView: View {
                     }
                 }
                 .width(76).customizationID("rating")
+                TableColumn("Quick Tag") { row in
+                    let slots = QuickTags.load(quickTagSlotsJSON)
+                    Menu {
+                        ForEach(0..<QuickTags.count, id: \.self) { i in
+                            Toggle(isOn: Binding(
+                                get: { QuickTags.isSet(row.quickTags ?? 0, i) },
+                                set: { _ in Task { try? await AnnotationStore(database: env.database).toggleQuickTag(i, for: [row]) } })) {
+                                Label(QuickTags.displayName(slots, i), systemImage: QuickTags.symbolName(slots, i))
+                            }
+                        }
+                        Divider()
+                        Button("None") {
+                            Task { try? await AnnotationStore(database: env.database).setQuickTagMask(0, for: row) }
+                        }
+                        .disabled((row.quickTags ?? 0) == 0)
+                    } label: {
+                        QuickTagIndicator(mask: row.quickTags ?? 0, slots: slots)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .contentShape(Rectangle())
+                    }
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                }
+                .width(min: 80, ideal: 170).customizationID("quickTag")
                 TableColumn("Tags") { row in
                     Text(row.tags.joined(separator: ", ")).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 }
@@ -113,6 +139,22 @@ struct SampleListView: View {
                     Button(rows.allSatisfy { $0.isFavorite == true } ? "Remove from Favorites" : "Add to Favorites") {
                         let fav = !(rows.allSatisfy { $0.isFavorite == true })
                         Task { for r in rows { try? await AnnotationStore(database: env.database).setFavorite(fav, for: r) } }
+                    }
+                    Menu("Quick Tag") {
+                        let slots = QuickTags.load(quickTagSlotsJSON)
+                        ForEach(0..<QuickTags.count, id: \.self) { i in
+                            let bit = QuickTags.mask(i)
+                            let allOn = rows.allSatisfy { ($0.quickTags ?? 0) & bit != 0 }
+                            Button {
+                                Task { try? await AnnotationStore(database: env.database).toggleQuickTag(i, for: rows) }
+                            } label: {
+                                Label(QuickTags.displayName(slots, i), systemImage: allOn ? "checkmark" : QuickTags.symbolName(slots, i))
+                            }
+                        }
+                        Divider()
+                        Button("None") {
+                            Task { for r in rows { try? await AnnotationStore(database: env.database).setQuickTagMask(0, for: r) } }
+                        }
                     }
                     Divider()
                     Button("Convert Sample Rate / Bit Depth…") {

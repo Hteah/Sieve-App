@@ -3,10 +3,14 @@ import SwiftUI
 struct SidebarView: View {
     @Environment(AppEnvironment.self) private var env
     @Bindable var model: LibraryViewModel
+    @AppStorage(QuickTags.storageKey) private var quickTagSlotsJSON = ""
     @State private var rootToRemove: Root?
     @State private var collapsedGroups: Set<Int64> = []
     @State private var groupSheet: GroupSheet?
     @State private var groupNameDraft = ""
+    @State private var quickTagRenameSlot: Int?
+    @State private var quickTagIconSlot: Int?
+    @State private var quickTagNameDraft = ""
 
     private enum GroupSheet: Identifiable {
         case create(assignRoot: Int64?)
@@ -81,8 +85,50 @@ struct SidebarView: View {
                     Text("Add tags from the inspector").font(.caption).foregroundStyle(.secondary)
                 }
             }
+
+            Section("Quick Tags") {
+                let slots = QuickTags.load(quickTagSlotsJSON)
+                ForEach(0..<QuickTags.count, id: \.self) { i in
+                    HStack {
+                        Label(QuickTags.displayName(slots, i), systemImage: QuickTags.symbolName(slots, i))
+                        Spacer()
+                        Text("\(model.quickTagCounts[i])").foregroundStyle(.secondary).font(.caption)
+                    }
+                    .tag(LibraryScope.quickTag(i))
+                    .dropDestination(for: Int64.self) { ids, _ in
+                        let rows = model.rows.filter { ids.contains($0.id) }
+                        Task { try? await AnnotationStore(database: env.database).addQuickTag(i, to: rows) }
+                        return true
+                    }
+                    .contextMenu {
+                        Button("Rename…") {
+                            quickTagNameDraft = QuickTags.displayName(slots, i)
+                            quickTagRenameSlot = i
+                        }
+                        Button("Choose Icon…") { quickTagIconSlot = i }
+                        Button("Default Icon") { updateSlot(i) { $0.symbol = QuickTags.defaults[i].symbol } }
+                    }
+                }
+            }
         }
         .listStyle(.sidebar)
+        .alert("Rename Quick Tag", isPresented: Binding(get: { quickTagRenameSlot != nil }, set: { if !$0 { quickTagRenameSlot = nil } })) {
+            TextField("Name", text: $quickTagNameDraft)
+            Button("Cancel", role: .cancel) { quickTagRenameSlot = nil }
+            Button("Rename") {
+                if let i = quickTagRenameSlot { updateSlot(i) { $0.name = quickTagNameDraft } }
+                quickTagRenameSlot = nil
+            }
+        }
+        .sheet(isPresented: Binding(get: { quickTagIconSlot != nil }, set: { if !$0 { quickTagIconSlot = nil } })) {
+            if let i = quickTagIconSlot {
+                let slots = QuickTags.load(quickTagSlotsJSON)
+                SymbolGridPicker(title: "Icon for \(QuickTags.displayName(slots, i))",
+                                 selected: QuickTags.symbolName(slots, i)) { symbol in
+                    updateSlot(i) { $0.symbol = symbol }
+                }
+            }
+        }
         .confirmationDialog("Remove \"\(rootToRemove?.name ?? "")\" from the library?", isPresented: Binding(get: { rootToRemove != nil }, set: { if !$0 { rootToRemove = nil } })) {
             Button("Remove", role: .destructive) {
                 if let id = rootToRemove?.id { Task { try? await env.scanner.removeRoot(id: id) } }
@@ -193,6 +239,14 @@ struct SidebarView: View {
                 set: { open in
                     if open { collapsedGroups.remove(groupId) } else { collapsedGroups.insert(groupId) }
                 })
+    }
+
+    /// Load the 6 Quick Tag slots, mutate slot `i`, and persist back to `@AppStorage`.
+    private func updateSlot(_ i: Int, _ transform: (inout QuickTag) -> Void) {
+        var slots = QuickTags.load(quickTagSlotsJSON)
+        guard slots.indices.contains(i) else { return }
+        transform(&slots[i])
+        quickTagSlotsJSON = QuickTags.encode(slots)
     }
 
     private func commitGroupSheet(_ sheet: GroupSheet) {

@@ -33,6 +33,7 @@ final class LibraryViewModel {
     private(set) var groups: [FolderGroup] = []
     private(set) var folderTrees: [Int64: [Queries.FolderNode]] = [:]
     private(set) var tags: [Queries.TagCount] = []
+    private(set) var quickTagCounts: [Int] = Array(repeating: 0, count: QuickTags.count)
     private(set) var isLoading = false
     var selection = Set<Int64>()
 
@@ -134,6 +135,7 @@ final class LibraryViewModel {
         var groups: [FolderGroup]
         var trees: [Int64: [Queries.FolderNode]]
         var tags: [Queries.TagCount]
+        var quickTagCounts: [Int]
     }
 
     private func startSidebarObservation() {
@@ -144,7 +146,9 @@ final class LibraryViewModel {
                 .fetchAll(db)
             var trees: [Int64: [Queries.FolderNode]] = [:]
             for r in roots { if let id = r.id { trees[id] = try Queries.folderTree(db: db, rootId: id) } }
-            return SidebarData(roots: roots, groups: groups, trees: trees, tags: try Queries.tagCounts(db: db))
+            return SidebarData(roots: roots, groups: groups, trees: trees,
+                               tags: try Queries.tagCounts(db: db),
+                               quickTagCounts: try Queries.quickTagCounts(db: db))
         }
         sidebarTask = Task { [weak self, database] in
             do {
@@ -154,6 +158,7 @@ final class LibraryViewModel {
                     self.groups = data.groups
                     self.folderTrees = data.trees
                     self.tags = data.tags
+                    self.quickTagCounts = data.quickTagCounts
                     // Don't leave a filter pointing at a group that no longer exists.
                     if case .group(let gid) = self.filter.scope,
                        !data.groups.contains(where: { $0.id == gid }) {

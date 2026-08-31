@@ -8,7 +8,7 @@ struct SampleSortTests {
                   fileSize: 1, modifiedAt: .init(), audioHash: nil, fileHash: nil, durationSec: 1,
                   sampleRate: rate, channels: 2, bitDepth: bits, formatName: "WAV PCM", bpm: nil,
                   musicalKey: nil, waveform: nil, peakDb: nil, rmsDb: nil, clippedSamples: nil,
-                  status: .present, rating: nil, isFavorite: nil, tagNames: nil)
+                  status: .present, rating: nil, isFavorite: nil, quickTags: nil, tagNames: nil)
     }
 
     @Test func sortsByRateAscendingThenReverses() {

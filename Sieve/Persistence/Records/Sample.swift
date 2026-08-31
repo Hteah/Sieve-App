@@ -87,6 +87,7 @@ struct SampleRow: Codable, Identifiable, Hashable, Sendable, FetchableRecord {
     var status: SampleStatus
     var rating: Int?
     var isFavorite: Bool?
+    var quickTags: Int?
     var tagNames: String?
 
     var contentHash: String? { audioHash ?? fileHash }
@@ -103,6 +104,7 @@ struct SampleRow: Codable, Identifiable, Hashable, Sendable, FetchableRecord {
             && lhs.status == rhs.status
             && lhs.rating == rhs.rating
             && lhs.isFavorite == rhs.isFavorite
+            && lhs.quickTags == rhs.quickTags
             && lhs.tagNames == rhs.tagNames
             && lhs.filename == rhs.filename
             && lhs.parentDir == rhs.parentDir
@@ -127,6 +129,7 @@ struct SampleRow: Codable, Identifiable, Hashable, Sendable, FetchableRecord {
         hasher.combine(id)
         hasher.combine(modifiedAt)
         hasher.combine(rating)
+        hasher.combine(quickTags)
         hasher.combine(tagNames)
     }
 }

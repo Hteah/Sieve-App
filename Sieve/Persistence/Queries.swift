@@ -106,6 +106,7 @@ enum LibraryScope: Hashable, Sendable {
     case folder(rootId: Int64, parentDir: String)
     case group(Int64)
     case tag(Int64)
+    case quickTag(Int)     // Quick Tag slot index 0..<QuickTags.count
 }
 
 struct SampleFilter: Hashable, Sendable {
@@ -161,6 +162,8 @@ enum Queries {
             wheres.append("status != 'unavailable' AND rootId IN (SELECT id FROM root WHERE groupId = \(groupId))")
         case .tag(let tagId):
             wheres.append("annotationId IN (SELECT annotationId FROM annotation_tag WHERE tagId = \(tagId))")
+        case .quickTag(let index):
+            wheres.append("status != 'unavailable' AND (COALESCE(quickTags, 0) & \(QuickTags.mask(index))) != 0")
         }
 
         if filter.minRating > 0 {
@@ -271,5 +274,16 @@ enum Queries {
                    (SELECT COUNT(*) FROM annotation_tag at WHERE at.tagId = t.id) AS count
             FROM tag t ORDER BY t.name COLLATE NOCASE
             """)
+    }
+
+    /// Number of annotations carrying each Quick Tag, indexed 0..<QuickTags.count.
+    static func quickTagCounts(db: Database) throws -> [Int] {
+        var counts = [Int](repeating: 0, count: QuickTags.count)
+        for mask in try Int.fetchAll(db, sql: "SELECT quickTags FROM annotation WHERE quickTags != 0") {
+            for i in 0..<QuickTags.count where mask & QuickTags.mask(i) != 0 {
+                counts[i] += 1
+            }
+        }
+        return counts
     }
 }
