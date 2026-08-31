@@ -8,6 +8,14 @@ struct AudioClipTests {
         AudioClip(channels: (0..<c).map { _ in (0..<n).map(value) }, sampleRate: rate)
     }
 
+    @Test func initPadsChannelsToEqualLength() {
+        let clip = AudioClip(channels: [[1, 2, 3, 4], [9, 9]], sampleRate: 48_000)
+        #expect(clip.channelCount == 2)
+        #expect(clip.frameCount == 4)
+        #expect(clip.channels[0] == [1, 2, 3, 4])
+        #expect(clip.channels[1] == [9, 9, 0, 0])
+    }
+
     @Test func cropKeepsSelectedRange() {
         let c = clip(frames: 100) { Float($0) }.cropped(to: 10..<20)
         #expect(c.frameCount == 10)

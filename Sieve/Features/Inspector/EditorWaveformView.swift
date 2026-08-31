@@ -169,14 +169,16 @@ struct EditorWaveformView: View {
                             hi = max(hi, bins[b].y)
                         }
                     }
-                } else if c < clip.channels.count {
+                } else if c < clip.channels.count, !clip.channels[c].isEmpty {
                     // No pyramid yet (just-loaded / mid-edit): scan raw, but sub-sample when a
                     // column covers a huge span so this stays smooth until the mip lands.
                     let ch = clip.channels[c]
-                    let step = max(1, (f1 - f0) / 2048)
-                    lo = ch[f0]; hi = ch[f0]
-                    var i = f0 + step
-                    while i < f1 {
+                    let a0 = min(max(0, f0), ch.count - 1)
+                    let a1 = min(max(a0 + 1, f1), ch.count)
+                    let step = max(1, (a1 - a0) / 2048)
+                    lo = ch[a0]; hi = ch[a0]
+                    var i = a0 + step
+                    while i < a1 {
                         let v = ch[i]
                         if v < lo { lo = v }
                         if v > hi { hi = v }

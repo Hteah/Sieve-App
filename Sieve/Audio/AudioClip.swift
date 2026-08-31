@@ -6,6 +6,14 @@ struct AudioClip: Sendable {
     var channels: [[Float]]      // channels[channel][frame]
     var sampleRate: Double
 
+    /// Channels are always padded to equal length, so `frameCount` (channel 0) is every channel's
+    /// length — the drawing and DSP code relies on that.
+    init(channels: [[Float]], sampleRate: Double) {
+        let n = channels.map(\.count).max() ?? 0
+        self.channels = channels.map { $0.count == n ? $0 : $0 + [Float](repeating: 0, count: n - $0.count) }
+        self.sampleRate = sampleRate
+    }
+
     var channelCount: Int { channels.count }
     var frameCount: Int { channels.first?.count ?? 0 }
     var duration: Double { sampleRate > 0 ? Double(frameCount) / sampleRate : 0 }
