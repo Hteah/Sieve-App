@@ -10,6 +10,8 @@ struct AppThemeTests {
         #expect(AppTheme.current("nonsense") == .system)
         #expect(AppTheme.system.accent == nil)
         #expect(AppTheme.purple.accent != nil)
+        #expect(AppTheme.amber.accent != nil && AppTheme.amber.isVintage)
+        #expect(!AppTheme.blue.isVintage)
     }
 
     @Test func appearanceRoundTrips() {

@@ -8,6 +8,7 @@ struct SettingsView: View {
     @AppStorage("editorMaxMinutes") private var editorMaxMinutes = 10
     @AppStorage("appTheme") private var themeRaw = AppTheme.system.rawValue
     @AppStorage("appAppearance") private var appearanceRaw = AppAppearance.system.rawValue
+    @AppStorage("appBrightness") private var brightness = 0.0
     @Environment(AppEnvironment.self) private var env
     @State private var recordingsFolder: URL?
     @State private var exportFolder: URL?
@@ -15,16 +16,19 @@ struct SettingsView: View {
     var body: some View {
         Form {
             Picker("Accent color", selection: $themeRaw) {
-                ForEach(AppTheme.allCases) { theme in
-                    HStack {
-                        Circle().fill(theme.accent ?? .accentColor).frame(width: 10, height: 10)
-                        Text(theme.label)
-                    }
-                    .tag(theme.rawValue)
-                }
+                Section("Standard") { themeRows(AppTheme.allCases.filter { !$0.isVintage }) }
+                Section("Vintage") { themeRows(AppTheme.allCases.filter(\.isVintage)) }
             }
             Picker("Appearance", selection: $appearanceRaw) {
                 ForEach(AppAppearance.allCases) { Text($0.label).tag($0.rawValue) }
+            }
+            LabeledContent("Brightness") {
+                HStack(spacing: 6) {
+                    Image(systemName: "moon.fill").font(.caption2).foregroundStyle(.secondary)
+                    Slider(value: $brightness, in: -1...1)
+                    Image(systemName: "sun.max.fill").font(.caption2).foregroundStyle(.secondary)
+                    Button("Reset") { brightness = 0 }.controlSize(.small).disabled(brightness == 0)
+                }
             }
 
             Divider()
@@ -108,6 +112,17 @@ struct SettingsView: View {
         .onAppear {
             recordingsFolder = env.bookmarks.lastRecordingsFolder()
             exportFolder = env.bookmarks.lastExportFolder()
+        }
+    }
+
+    @ViewBuilder
+    private func themeRows(_ themes: [AppTheme]) -> some View {
+        ForEach(themes) { theme in
+            HStack {
+                Circle().fill(theme.accent ?? .accentColor).frame(width: 10, height: 10)
+                Text(theme.label)
+            }
+            .tag(theme.rawValue)
         }
     }
 
