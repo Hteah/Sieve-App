@@ -34,6 +34,7 @@ final class EditorSession {
     private(set) var isBusy = false
     private(set) var loadError: String?
     private(set) var clipboard: AudioClip?
+    private(set) var lastExportURL: URL?
     /// True while the pop-out editor window is open; the inspector's Edit tab hides its editor then.
     var windowOpen = false
 
@@ -382,6 +383,53 @@ final class EditorSession {
         case .url:
             break
         }
+    }
+
+    /// Writes just the current selection to a new WAV in the remembered export folder (a directory
+    /// picker runs the first time). Auto-named; doesn't touch the loaded clip.
+    func exportSelection(bits: BitDepthOption) async {
+        guard let clip, let sel = selection, !sel.isEmpty else { return }
+        let range = clip.clampedRange(sel)
+        guard !range.isEmpty else { return }
+
+        guard let folder = env.bookmarks.lastExportFolder() ?? pickExportFolder() else { return }
+
+        let stem = source?.url.deletingPathExtension().lastPathComponent ?? "Selection"
+        let name = Self.exportName(stem: stem, range: range, sampleRate: clip.sampleRate)
+        let dest = FileOperator.uniqueDestination(in: folder, filename: name) {
+            FileManager.default.fileExists(atPath: $0.path)
+        }
+        let piece = clip.cropped(to: range)
+
+        isBusy = true
+        defer { isBusy = false }
+        switch await Self.writeFile(clip: piece, to: dest, bits: Self.resolve(bits)) {
+        case .ok:
+            lastExportURL = dest
+            if let rootId = env.rootId(containing: dest) { await env.scanner.scan(rootId: rootId) }
+        case .failure(let message):
+            loadError = message
+        case .url:
+            break
+        }
+    }
+
+    private func pickExportFolder() -> URL? {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = true
+        panel.prompt = "Use Folder"
+        panel.message = "Choose a folder to export selections into."
+        guard panel.runModal() == .OK, let url = panel.url else { return nil }
+        env.bookmarks.rememberExportFolder(url)
+        return url
+    }
+
+    nonisolated static func exportName(stem: String, range: Range<Int>, sampleRate: Double) -> String {
+        let start = Double(range.lowerBound) / max(1, sampleRate)
+        let end = Double(range.upperBound) / max(1, sampleRate)
+        return String(format: "%@ [%.2f-%.2f].wav", stem, start, end)
     }
 
     private static func replaceOnDisk(clip: AudioClip, originalURL: URL, rootURL: URL,

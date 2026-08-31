@@ -8,6 +8,7 @@ struct SettingsView: View {
     @AppStorage("editorMaxMinutes") private var editorMaxMinutes = 10
     @Environment(AppEnvironment.self) private var env
     @State private var recordingsFolder: URL?
+    @State private var exportFolder: URL?
 
     var body: some View {
         Form {
@@ -66,21 +67,53 @@ struct SettingsView: View {
             }
             Text("Where the editor's Record button saves each take.")
                 .font(.caption).foregroundStyle(.secondary)
+
+            LabeledContent("Export folder") {
+                HStack(spacing: 8) {
+                    Text(exportFolder?.lastPathComponent ?? "Not set")
+                        .foregroundStyle(exportFolder == nil ? AnyShapeStyle(.secondary) : AnyShapeStyle(.primary))
+                        .lineLimit(1).truncationMode(.middle)
+                    Spacer()
+                    Button(exportFolder == nil ? "Choose…" : "Change…") { chooseExportFolder() }
+                    if exportFolder != nil {
+                        Button("Clear", role: .destructive) {
+                            env.bookmarks.clearExportFolder()
+                            exportFolder = nil
+                        }
+                    }
+                }
+            }
+            Text("Where the editor's Export Selection button writes cropped audio.")
+                .font(.caption).foregroundStyle(.secondary)
         }
         .padding(20)
         .frame(width: 420)
-        .onAppear { recordingsFolder = env.bookmarks.lastRecordingsFolder() }
+        .onAppear {
+            recordingsFolder = env.bookmarks.lastRecordingsFolder()
+            exportFolder = env.bookmarks.lastExportFolder()
+        }
     }
 
     private func chooseRecordingsFolder() {
+        guard let url = pickFolder(message: "Choose a folder to save recordings into.") else { return }
+        env.bookmarks.rememberRecordingsFolder(url)
+        recordingsFolder = url
+    }
+
+    private func chooseExportFolder() {
+        guard let url = pickFolder(message: "Choose a folder to export selections into.") else { return }
+        env.bookmarks.rememberExportFolder(url)
+        exportFolder = url
+    }
+
+    private func pickFolder(message: String) -> URL? {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.canCreateDirectories = true
         panel.prompt = "Use Folder"
-        panel.message = "Choose a folder to save recordings into."
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        env.bookmarks.rememberRecordingsFolder(url)
-        recordingsFolder = url
+        panel.message = message
+        guard panel.runModal() == .OK else { return nil }
+        return panel.url
     }
 }

@@ -87,6 +87,25 @@ final class BookmarkStore: Sendable {
     func clearRecordingsFolder() {
         UserDefaults.standard.removeObject(forKey: Self.recordingsFolderKey)
     }
+
+    // Remembered folder for the editor's "Export Selection" (bookmark stored in UserDefaults).
+    private static let exportFolderKey = "exportFolderBookmark"
+
+    func rememberExportFolder(_ url: URL) {
+        if let data = try? makeBookmark(for: url) {
+            UserDefaults.standard.set(data, forKey: Self.exportFolderKey)
+        }
+    }
+
+    func lastExportFolder() -> URL? {
+        guard let data = UserDefaults.standard.data(forKey: Self.exportFolderKey),
+              let r = try? resolve(data) else { return nil }
+        return r.url
+    }
+
+    func clearExportFolder() {
+        UserDefaults.standard.removeObject(forKey: Self.exportFolderKey)
+    }
 }
 
 /// Runs `body` while holding security-scoped access to `url`. Balanced start/stop.

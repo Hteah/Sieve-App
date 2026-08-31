@@ -22,6 +22,7 @@ struct AudioEditorView: View {
     @State private var showAmplify = false
     @State private var showReplaceConfirm = false
     @State private var showRecordingSaved = false
+    @State private var showExportSaved = false
 
     private var session: EditorSession { env.editor }
 
@@ -50,6 +51,11 @@ struct AudioEditorView: View {
             guard new != nil else { return }
             showRecordingSaved = true
             Task { try? await Task.sleep(for: .seconds(6)); showRecordingSaved = false }
+        }
+        .onChange(of: session.lastExportURL) { _, new in
+            guard new != nil else { return }
+            showExportSaved = true
+            Task { try? await Task.sleep(for: .seconds(6)); showExportSaved = false }
         }
         .background {
             if isPopOut { WindowLevelSetter(level: floatOnTop ? .floating : .normal) }
@@ -189,13 +195,19 @@ struct AudioEditorView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .fixedSize(horizontal: false, vertical: true)
         } else if showRecordingSaved, let url = session.recorder.lastRecordingURL {
-            HStack(spacing: 6) {
-                Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
-                Text("Saved \(url.lastPathComponent)").font(.caption).lineLimit(1)
-                Button("Reveal") { NSWorkspace.shared.activateFileViewerSelecting([url]) }
-                    .buttonStyle(.link).controlSize(.small)
-                Spacer()
-            }
+            savedLine("Saved", url)
+        } else if showExportSaved, let url = session.lastExportURL {
+            savedLine("Exported", url)
+        }
+    }
+
+    private func savedLine(_ verb: String, _ url: URL) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+            Text("\(verb) \(url.lastPathComponent)").font(.caption).lineLimit(1)
+            Button("Reveal") { NSWorkspace.shared.activateFileViewerSelecting([url]) }
+                .buttonStyle(.link).controlSize(.small)
+            Spacer()
         }
     }
 
@@ -279,6 +291,8 @@ struct AudioEditorView: View {
             .labelsHidden().frame(width: 116)
 
             Button("Save As New…") { Task { await session.saveAsNewFile(bits: saveBits) } }
+            Button("Export Selection…") { Task { await session.exportSelection(bits: saveBits) } }
+                .disabled(!session.hasSelection)
             Button("Save (Replace…)") { showReplaceConfirm = true }.disabled(!session.isDirty)
             Button("Revert") { Task { await session.revert() } }.disabled(!session.isDirty)
             Spacer()
