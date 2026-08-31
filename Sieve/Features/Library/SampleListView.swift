@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -62,6 +63,14 @@ struct SampleListView: View {
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .contentShape(Rectangle())
+                    // `.draggable` on a Table cell swallows the click that would select the
+                    // row, so select it here — unless a modifier means the user is extending
+                    // the native shift/⌘ selection.
+                    .simultaneousGesture(TapGesture().onEnded {
+                        if NSEvent.modifierFlags.isDisjoint(with: [.shift, .command]) {
+                            model.selection = [row.id]
+                        }
+                    })
                     .draggable(SampleDrag(id: row.id,
                                           fileURL: env.fileURL(for: row),
                                           rootURL: env.rootURL(for: row.rootId),
