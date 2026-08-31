@@ -22,6 +22,9 @@ struct EditorWaveformView: View {
     /// Draws an m:ss time ruler along the bottom (pop-out editor only).
     var showsTimeRuler = false
 
+    @AppStorage("appTheme") private var themeRaw = AppTheme.system.rawValue
+    private var accent: Color { AppTheme.current(themeRaw).waveformColor }
+
     @State private var visibleStart = 0
     @State private var visibleFrames = 0          // 0 => whole clip
     @State private var drag: DragState?
@@ -278,7 +281,7 @@ struct EditorWaveformView: View {
                 wave.move(to: CGPoint(x: x, y: mid - CGFloat(hi) * half))
                 wave.addLine(to: CGPoint(x: x, y: mid - CGFloat(lo) * half))
             }
-            ctx.stroke(wave, with: .color(.accentColor), lineWidth: 1)
+            ctx.stroke(wave, with: .color(accent), lineWidth: 1)
 
             var zero = Path()
             zero.move(to: CGPoint(x: 0, y: mid))
@@ -298,19 +301,19 @@ struct EditorWaveformView: View {
             let x1 = min(size.width, xForFrame(s.upperBound))
             if x1 > 0, x0 < size.width, x1 > x0 {
                 ctx.fill(Path(CGRect(x: x0, y: 0, width: max(1, x1 - x0), height: plotH)),
-                         with: .color(.accentColor.opacity(0.18)))
+                         with: .color(accent.opacity(0.18)))
             }
             for (f, x) in [(s.lowerBound, xForFrame(s.lowerBound)), (s.upperBound, xForFrame(s.upperBound))]
             where f >= start && f <= end {
                 var edge = Path()
                 edge.move(to: CGPoint(x: x, y: 0))
                 edge.addLine(to: CGPoint(x: x, y: plotH))
-                ctx.stroke(edge, with: .color(.accentColor.opacity(0.9)), lineWidth: 2)
+                ctx.stroke(edge, with: .color(accent.opacity(0.9)), lineWidth: 2)
                 let hw: CGFloat = 5, hh: CGFloat = 14
                 for cy in [hh / 2 + 1, plotH - hh / 2 - 1] {
                     ctx.fill(Path(roundedRect: CGRect(x: x - hw / 2, y: cy - hh / 2, width: hw, height: hh),
                                   cornerRadius: 2),
-                             with: .color(.accentColor))
+                             with: .color(accent))
                 }
             }
         }

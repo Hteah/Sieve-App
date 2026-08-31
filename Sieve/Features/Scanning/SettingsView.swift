@@ -6,12 +6,29 @@ struct SettingsView: View {
     @AppStorage("previewVolume") private var previewVolume = 1.0
     @AppStorage("editorNormalizeDb") private var normalizeDb = -1.0
     @AppStorage("editorMaxMinutes") private var editorMaxMinutes = 10
+    @AppStorage("appTheme") private var themeRaw = AppTheme.system.rawValue
+    @AppStorage("appAppearance") private var appearanceRaw = AppAppearance.system.rawValue
     @Environment(AppEnvironment.self) private var env
     @State private var recordingsFolder: URL?
     @State private var exportFolder: URL?
 
     var body: some View {
         Form {
+            Picker("Accent color", selection: $themeRaw) {
+                ForEach(AppTheme.allCases) { theme in
+                    HStack {
+                        Circle().fill(theme.accent ?? .accentColor).frame(width: 10, height: 10)
+                        Text(theme.label)
+                    }
+                    .tag(theme.rawValue)
+                }
+            }
+            Picker("Appearance", selection: $appearanceRaw) {
+                ForEach(AppAppearance.allCases) { Text($0.label).tag($0.rawValue) }
+            }
+
+            Divider()
+
             Toggle("Play sample when selected", isOn: $autoPreview)
             Slider(value: $previewVolume, in: 0...1) { Text("Preview volume") }
                 .onChange(of: previewVolume, initial: true) { _, v in env.player.volume = Float(v) }

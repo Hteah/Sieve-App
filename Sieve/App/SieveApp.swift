@@ -9,6 +9,7 @@ struct SieveApp: App {
             ContentView()
                 .environment(env)
                 .frame(minWidth: 840, minHeight: 600)
+                .modifier(Themed())
         }
         .commands {
             SieveCommands(env: env)
@@ -18,12 +19,14 @@ struct SieveApp: App {
             AudioEditorView(isPopOut: true)
                 .environment(env)
                 .frame(minWidth: 600, minHeight: 380)
+                .modifier(Themed())
         }
         .defaultSize(width: 1040, height: 560)
 
         Settings {
             SettingsView()
                 .environment(env)
+                .modifier(Themed())
         }
     }
 }

@@ -5,8 +5,10 @@ struct WaveformView: View {
     var summary: WaveformSummary?
     var playhead: Double? = nil          // 0...1
     var showGrid: Bool = false
-    var accent: Color = .accentColor
     var onSeek: ((Double) -> Void)? = nil
+
+    @AppStorage("appTheme") private var themeRaw = AppTheme.system.rawValue
+    private var accent: Color { AppTheme.current(themeRaw).waveformColor }
 
     var body: some View {
         Canvas(rendersAsynchronously: true) { ctx, size in
