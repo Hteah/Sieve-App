@@ -125,7 +125,9 @@ struct AudioEditorView: View {
             selection: Binding(get: { session.selection }, set: { session.selection = $0 }),
             playheadFrame: mirroredPlayhead,
             onClickSeek: { session.setCursor($0) },
-            onSelectionCommitted: { session.startPlayback() },   // audition the new selection
+            onSelectionCommitted: {                              // audition the new selection
+                if !session.recorder.isRecording { session.startPlayback() }
+            },
             resetToken: session.source?.sampleId
         )
         .frame(minHeight: 130, maxHeight: .infinity)
@@ -149,13 +151,11 @@ struct AudioEditorView: View {
             }
             .help(session.hasSelection ? "Play the selection" : "Play from the cursor")
             .modifier(SpaceToToggle(enabled: isPopOut))
-            .disabled(session.recorder.isRecording)
             Toggle(isOn: Binding(get: { session.looping }, set: { session.looping = $0 })) {
                 Image(systemName: "repeat")
             }
             .toggleStyle(.button)
             .help(session.hasSelection ? "Loop the selection" : "Loop")
-            .disabled(session.recorder.isRecording)
 
             Text(Fmt.duration(Double(mirroredPlayhead ?? 0) / max(1, session.sampleRate)))
                 .font(.caption).monospacedDigit().foregroundStyle(.secondary)
