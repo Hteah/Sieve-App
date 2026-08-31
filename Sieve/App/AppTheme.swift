@@ -106,11 +106,20 @@ struct Themed: ViewModifier {
     func body(content: Content) -> some View {
         let theme = AppTheme.current(themeRaw)
         let appearance = AppAppearance(rawValue: appearanceRaw) ?? .system
-        // Asymmetric: allow more dimming than brightening.
-        let shift = brightness < 0 ? brightness * 0.4 : brightness * 0.18
         content
             .tint(theme.accent)   // nil = no override
             .preferredColorScheme(appearance.colorScheme)
-            .brightness(shift)
+            // A dim/brighten wash as an overlay — a `.brightness()` filter on the whole
+            // window breaks the NavigationSplitView + toolbar safe-area layout.
+            .overlay {
+                if brightness != 0 {
+                    Rectangle()
+                        .fill(brightness < 0 ? Color.black : Color.white)
+                        .opacity(brightness < 0 ? min(0.6, -brightness * 0.55) : min(0.22, brightness * 0.22))
+                        .blendMode(brightness < 0 ? .normal : .plusLighter)
+                        .allowsHitTesting(false)
+                        .ignoresSafeArea()
+                }
+            }
     }
 }
