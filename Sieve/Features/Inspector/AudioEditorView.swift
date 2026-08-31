@@ -134,7 +134,9 @@ struct AudioEditorView: View {
             onSelectionCommitted: { session.startPlayback() },   // jump playback to the new selection
             resetToken: session.source?.sampleId
         )
-        .frame(minHeight: 130, maxHeight: .infinity)
+        // Match the Info tab's 120 pt waveform inline; let the pop-out window use the room.
+        .frame(height: isPopOut ? nil : 120)
+        .frame(maxHeight: isPopOut ? .infinity : nil)
     }
 
     /// While playing: the editor's own playhead (or the list preview's, if that's what's playing
