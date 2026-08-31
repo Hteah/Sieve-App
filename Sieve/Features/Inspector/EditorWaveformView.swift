@@ -18,9 +18,23 @@ struct EditorWaveformView: View {
 
     @State private var visibleStart = 0
     @State private var visibleFrames = 0          // 0 => whole clip
-    @State private var dragAnchor: Int?
+    @State private var drag: DragState?
 
     private let minSpan = 16
+    private let edgeTolerance: CGFloat = 8
+
+    enum EdgeHit { case newSelection, resizeStart, resizeEnd }
+
+    /// `anchor`: for `.newSelection` the press frame; for a resize, the opposite (fixed) edge's frame.
+    private struct DragState { var kind: EdgeHit; var anchor: Int }
+
+    /// Which drag a press starts, given the pixel x of the press and of the selection's edges.
+    nonisolated static func hitEdge(pressX: CGFloat, startX: CGFloat, endX: CGFloat, tolerance: CGFloat) -> EdgeHit {
+        let dStart = abs(pressX - startX)
+        let dEnd = abs(pressX - endX)
+        guard dStart <= tolerance || dEnd <= tolerance else { return .newSelection }
+        return dStart <= dEnd ? .resizeStart : .resizeEnd
+    }
 
     var body: some View {
         GeometryReader { geo in
@@ -44,7 +58,8 @@ struct EditorWaveformView: View {
                         }
                     },
                     onDrag: { x, phase in handleDrag(x: x, phase: phase, width: width, span: span, start: start) },
-                    onDoubleClick: { _ in if n > 0 { selection = 0..<n } }
+                    onDoubleClick: { _ in if n > 0 { selection = 0..<n } },
+                    edgeNearX: { x in nearSelectionEdge(x, width: width, span: span, start: start) }
                 )
             }
             .overlay(alignment: .topTrailing) { zoomControls(width: width, n: n, span: span, start: start) }
@@ -82,24 +97,56 @@ struct EditorWaveformView: View {
         return min(clip.frameCount, max(0, start + Int(frac * CGFloat(span))))
     }
 
-    private func handleDrag(x: CGFloat, phase: InputCatcher.Phase, width: CGFloat, span: Int, start: Int) {
-        let f = frame(atX: x, width: width, span: span, start: start)
+    private func x(forFrame fr: Int, width: CGFloat, span: Int, start: Int) -> CGFloat {
+        (CGFloat(fr - start) / CGFloat(max(1, span))) * width
+    }
+
+    private func nearSelectionEdge(_ px: CGFloat, width: CGFloat, span: Int, start: Int) -> Bool {
+        guard let s = selection, !s.isEmpty else { return false }
+        let sx = x(forFrame: s.lowerBound, width: width, span: span, start: start)
+        let ex = x(forFrame: s.upperBound, width: width, span: span, start: start)
+        return abs(px - sx) <= edgeTolerance || abs(px - ex) <= edgeTolerance
+    }
+
+    private func handleDrag(x px: CGFloat, phase: InputCatcher.Phase, width: CGFloat, span: Int, start: Int) {
+        let f = frame(atX: px, width: width, span: span, start: start)
         switch phase {
         case .began:
-            dragAnchor = f
-        case .changed:
-            let a = dragAnchor ?? f
-            let lo = min(a, f), hi = max(a, f)
-            selection = lo < hi ? lo..<hi : nil
-        case .ended:
-            let framesPerPixel = Double(span) / Double(max(1, width))
-            if let a = dragAnchor, abs(a - f) <= max(1, Int(3 * framesPerPixel)) {
-                selection = nil          // a click clears the selection…
-                onClickSeek?(f)          // …and moves the playhead here
-            } else if selection != nil {
-                onSelectionCommitted?()  // a real drag-selection is now in place
+            if let s = selection, !s.isEmpty {
+                let sx = x(forFrame: s.lowerBound, width: width, span: span, start: start)
+                let ex = x(forFrame: s.upperBound, width: width, span: span, start: start)
+                switch Self.hitEdge(pressX: px, startX: sx, endX: ex, tolerance: edgeTolerance) {
+                case .resizeStart: drag = DragState(kind: .resizeStart, anchor: s.upperBound)
+                case .resizeEnd:   drag = DragState(kind: .resizeEnd, anchor: s.lowerBound)
+                case .newSelection: drag = DragState(kind: .newSelection, anchor: f)
+                }
+            } else {
+                drag = DragState(kind: .newSelection, anchor: f)
             }
-            dragAnchor = nil
+        case .changed:
+            guard let d = drag else { return }
+            let lo = min(d.anchor, f), hi = max(d.anchor, f)
+            switch d.kind {
+            case .newSelection:
+                selection = lo < hi ? lo..<hi : nil
+            case .resizeStart, .resizeEnd:
+                selection = lo..<max(hi, lo + 1)
+            }
+        case .ended:
+            defer { drag = nil }
+            guard let d = drag else { return }
+            switch d.kind {
+            case .newSelection:
+                let framesPerPixel = Double(span) / Double(max(1, width))
+                if abs(d.anchor - f) <= max(1, Int(3 * framesPerPixel)) {
+                    selection = nil          // a click clears the selection…
+                    onClickSeek?(f)          // …and moves the playhead here
+                } else if selection != nil {
+                    onSelectionCommitted?()  // a real drag-selection is now in place
+                }
+            case .resizeStart, .resizeEnd:
+                onSelectionCommitted?()      // playback jumps to the adjusted selection
+            }
         }
     }
 
@@ -216,7 +263,13 @@ struct EditorWaveformView: View {
                 var edge = Path()
                 edge.move(to: CGPoint(x: x, y: 0))
                 edge.addLine(to: CGPoint(x: x, y: size.height))
-                ctx.stroke(edge, with: .color(.accentColor.opacity(0.85)), lineWidth: 1)
+                ctx.stroke(edge, with: .color(.accentColor.opacity(0.9)), lineWidth: 2)
+                let hw: CGFloat = 5, hh: CGFloat = 14
+                for cy in [hh / 2 + 1, size.height - hh / 2 - 1] {
+                    ctx.fill(Path(roundedRect: CGRect(x: x - hw / 2, y: cy - hh / 2, width: hw, height: hh),
+                                  cornerRadius: 2),
+                             with: .color(.accentColor))
+                }
             }
         }
 
@@ -238,6 +291,7 @@ private struct InputCatcher: NSViewRepresentable {
     var onScroll: (_ deltaX: CGFloat, _ deltaY: CGFloat, _ x: CGFloat) -> Void
     var onDrag: (_ x: CGFloat, _ phase: Phase) -> Void
     var onDoubleClick: (_ x: CGFloat) -> Void
+    var edgeNearX: (_ x: CGFloat) -> Bool
 
     func makeNSView(context: Context) -> NSView {
         let view = CatchingView()
@@ -253,12 +307,26 @@ private struct InputCatcher: NSViewRepresentable {
         view.onScroll = onScroll
         view.onDrag = onDrag
         view.onDoubleClick = onDoubleClick
+        view.edgeNearX = edgeNearX
     }
 
     final class CatchingView: NSView {
         var onScroll: ((CGFloat, CGFloat, CGFloat) -> Void)?
         var onDrag: ((CGFloat, Phase) -> Void)?
         var onDoubleClick: ((CGFloat) -> Void)?
+        var edgeNearX: ((CGFloat) -> Bool)?
+        private var tracking: NSTrackingArea?
+        private var dragging = false
+
+        override func updateTrackingAreas() {
+            super.updateTrackingAreas()
+            if let tracking { removeTrackingArea(tracking) }
+            let area = NSTrackingArea(rect: bounds,
+                                      options: [.mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+                                      owner: self, userInfo: nil)
+            addTrackingArea(area)
+            tracking = area
+        }
 
         override func scrollWheel(with event: NSEvent) {
             onScroll?(event.scrollingDeltaX, event.scrollingDeltaY, localX(event))
@@ -266,11 +334,23 @@ private struct InputCatcher: NSViewRepresentable {
 
         override func mouseDown(with event: NSEvent) {
             if event.clickCount == 2 { onDoubleClick?(localX(event)) }
-            else { onDrag?(localX(event), .began) }
+            else { dragging = true; onDrag?(localX(event), .began) }
         }
 
         override func mouseDragged(with event: NSEvent) { onDrag?(localX(event), .changed) }
-        override func mouseUp(with event: NSEvent) { onDrag?(localX(event), .ended) }
+
+        override func mouseUp(with event: NSEvent) {
+            dragging = false
+            onDrag?(localX(event), .ended)
+        }
+
+        override func mouseMoved(with event: NSEvent) {
+            guard !dragging else { return }
+            if edgeNearX?(localX(event)) == true { NSCursor.resizeLeftRight.set() }
+            else { NSCursor.arrow.set() }
+        }
+
+        override func mouseExited(with event: NSEvent) { NSCursor.arrow.set() }
 
         private func localX(_ event: NSEvent) -> CGFloat {
             convert(event.locationInWindow, from: nil).x
