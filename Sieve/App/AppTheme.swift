@@ -3,7 +3,7 @@ import SwiftUI
 /// User-selectable accent colour. `.system` = follow the macOS accent (no tint override).
 enum AppTheme: String, CaseIterable, Identifiable {
     // Standard
-    case system, blue, indigo, purple, pink, red, orange, green, teal, graphite
+    case system, blue, indigo, purple, pink, red, orange, green, teal, graphite, industrial
     // Vintage computing
     case amber, phosphor, cgaCyan, cgaMagenta, commodore, gameBoy, plasma, dosBeige, vaporPink
 
@@ -30,6 +30,7 @@ enum AppTheme: String, CaseIterable, Identifiable {
         case .green: "Green"
         case .teal: "Teal"
         case .graphite: "Graphite"
+        case .industrial: "Industrial Grey"
         case .amber: "Amber CRT"
         case .phosphor: "Phosphor Green"
         case .cgaCyan: "CGA Cyan"
@@ -55,6 +56,7 @@ enum AppTheme: String, CaseIterable, Identifiable {
         case .green: .green
         case .teal: .teal
         case .graphite: Color(white: 0.55)
+        case .industrial: Self.rgb(90, 96, 104)   // cool gunmetal
         case .amber: Self.rgb(255, 176, 0)
         case .phosphor: Self.rgb(45, 255, 90)
         case .cgaCyan: Self.rgb(85, 255, 255)
