@@ -52,12 +52,13 @@ final class EditorSession {
         self.recorder = AudioRecorder(env: env)
     }
 
-    /// Starts/stops capturing input to a new WAV. Stops playback first so nothing bleeds in.
+    /// Starts/stops capturing input to a new WAV. Stops playback first so its engine doesn't
+    /// fight the recorder's for the audio device.
     func toggleRecording() {
         if recorder.isRecording {
             recorder.stop()
         } else {
-            player.stop()
+            stopPlayback()
             env.player.stop()
             Task { await recorder.start() }
         }
@@ -310,19 +311,24 @@ final class EditorSession {
     }
 
     func togglePlay() {
-        if player.isPlaying { player.stop() } else { startPlayback() }
+        if player.isPlaying { stopPlayback() } else { startPlayback() }
     }
 
     func startPlayback() {
-        guard let clip, playbackRange.count > 0 else { return }
+        guard !recorder.isRecording, let clip, playbackRange.count > 0 else { return }
         env.player.stop()
         player.play(clip, range: playbackRange, looping: looping)
     }
 
-    func stopPlayback() { player.stop() }
+    /// Stops playback, leaving the cursor where the playhead was so Play resumes from there.
+    func stopPlayback() {
+        if player.isPlaying { cursor = max(0, min(frameCount, player.playheadFrame)) }
+        player.stop()
+    }
 
     /// Moves the insertion point (from a waveform click); jumps live playback there too.
     func setCursor(_ frame: Int) {
+        guard !recorder.isRecording else { return }
         cursor = max(0, min(frameCount, frame))
         if player.isPlaying { startPlayback() }
     }

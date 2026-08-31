@@ -37,7 +37,7 @@ final class AudioEditorPlayer {
             node.scheduleBuffer(buffer, at: nil, options: options) { [weak self] in
                 Task { @MainActor in self?.bufferFinished(looping: looping) }
             }
-            if !engine.isRunning { try engine.start() }
+            if !engine.isRunning { try startEngineRecovering(format: buffer.format) }
             node.play()
             isPlaying = true
             playheadFrame = r.lowerBound
@@ -67,6 +67,21 @@ final class AudioEditorPlayer {
             engine.connect(node, to: engine.mainMixerNode, format: format)
             currentFormat = format
             engine.prepare()
+        }
+    }
+
+    /// Starts the engine; if it fails (e.g. the recorder just had the device), fully resets the
+    /// graph and tries once more.
+    private func startEngineRecovering(format: AVAudioFormat) throws {
+        do {
+            try engine.start()
+        } catch {
+            engine.stop()
+            engine.reset()
+            engine.connect(node, to: engine.mainMixerNode, format: format)
+            currentFormat = format
+            engine.prepare()
+            try engine.start()
         }
     }
 
