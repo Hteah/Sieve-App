@@ -21,13 +21,13 @@ struct SampleListView: View {
     // waveform is left. Each pair is (customizationID, table width in pt at which it appears).
     private static let responsiveColumns: [(id: String, minWidth: CGFloat)] = [
         ("name", 280),
-        ("duration", 360),
-        ("rate", 430),
-        ("bits", 470),
-        ("rating", 560),
-        ("quickTag", 610),
-        ("tags", 760),
-        ("size", 860),
+        ("format", 330),
+        ("duration", 390),
+        ("rate", 450),
+        ("bits", 490),
+        ("rating", 580),
+        ("quickTag", 630),
+        ("size", 300),   // low threshold: keep Size visible at any real pane width
     ]
 
     var body: some View {
@@ -51,6 +51,11 @@ struct SampleListView: View {
                 }
                 .width(min: 140, ideal: 260)
                 .customizationID("name")
+
+                TableColumn("Format", value: \.ext) { row in
+                    Text(row.ext.uppercased()).foregroundStyle(.secondary)
+                }
+                .width(52).customizationID("format")
 
                 TableColumn("Duration", value: \.durationSortKey) { row in
                     Text(Fmt.duration(row.durationSec)).monospacedDigit()
@@ -93,15 +98,11 @@ struct SampleListView: View {
                     .menuStyle(.borderlessButton)
                     .menuIndicator(.hidden)
                 }
-                .width(min: 60, ideal: 96).customizationID("quickTag")
-                TableColumn("Tags") { row in
-                    Text(row.tags.joined(separator: ", ")).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                }
-                .width(min: 60, ideal: 140).customizationID("tags")
+                .width(min: 60, ideal: 96, max: 160).customizationID("quickTag")
                 TableColumn("Size", value: \.fileSize) { row in
                     Text(Fmt.bytes(row.fileSize)).monospacedDigit()
                 }
-                .width(64).customizationID("size")
+                .width(min: 64, ideal: 80).customizationID("size")
             }
             // Re-sorting reshuffles nearly every row; diffing 800+ scrambled rows is what
             // stalled the UI. Keying the table to the sort makes SwiftUI rebuild it once
@@ -214,6 +215,7 @@ struct SampleListView: View {
                 case .rating: KeyPathComparator(\.ratingSortKey, order: order)
                 case .rate: KeyPathComparator(\.rateSortKey, order: order)
                 case .bits: KeyPathComparator(\.bitsSortKey, order: order)
+                case .format: KeyPathComparator(\.ext, order: order)
                 }
                 return [kp]
             },
@@ -226,6 +228,7 @@ struct SampleListView: View {
                 else if kp == \SampleRow.bitsSortKey { field = .bits }
                 else if kp == \SampleRow.ratingSortKey { field = .rating }
                 else if kp == \SampleRow.fileSize { field = .size }
+                else if kp == \SampleRow.ext { field = .format }
                 else { field = .name }
                 if field == model.filter.sort {
                     model.filter.sortAscending = (c.order == .forward)

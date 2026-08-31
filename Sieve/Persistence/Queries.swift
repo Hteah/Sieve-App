@@ -2,7 +2,7 @@ import Foundation
 import GRDB
 
 enum SampleSort: String, CaseIterable, Sendable, Identifiable {
-    case name, path, duration, size, modified, rating, rate, bits
+    case name, path, duration, size, modified, rating, rate, bits, format
     var id: String { rawValue }
     var label: String {
         switch self {
@@ -14,6 +14,7 @@ enum SampleSort: String, CaseIterable, Sendable, Identifiable {
         case .rating: "Rating"
         case .rate: "Sample rate"
         case .bits: "Bit depth"
+        case .format: "Format"
         }
     }
 
@@ -28,13 +29,14 @@ enum SampleSort: String, CaseIterable, Sendable, Identifiable {
         case .rating: "COALESCE(rating, 0)"
         case .rate: "sampleRate"
         case .bits: "bitDepth"
+        case .format: "ext COLLATE NOCASE"
         }
     }
 
     /// Sorts whose column can be NULL — those rows sort last regardless of direction.
     private var nullable: Bool {
         switch self {
-        case .name, .path, .rating: false
+        case .name, .path, .rating, .format: false
         case .duration, .size, .modified, .rate, .bits: true
         }
     }
@@ -42,7 +44,7 @@ enum SampleSort: String, CaseIterable, Sendable, Identifiable {
     /// The direction to snap to when the user first switches to this sort.
     var defaultAscending: Bool {
         switch self {
-        case .name, .path, .rate, .bits: true
+        case .name, .path, .rate, .bits, .format: true
         case .duration, .size, .modified, .rating: false   // duration: longest first
         }
     }
@@ -83,6 +85,9 @@ enum SampleSort: String, CaseIterable, Sendable, Identifiable {
             return Self.orderOptional(a.sampleRate, b.sampleRate, ascending: ascending, aId: a.id, bId: b.id)
         case .bits:
             return Self.orderOptional(a.bitDepth, b.bitDepth, ascending: ascending, aId: a.id, bId: b.id)
+        case .format:
+            let r = a.ext.localizedCaseInsensitiveCompare(b.ext)
+            return r == .orderedSame ? a.id < b.id : ascending == (r == .orderedAscending)
         }
     }
 
