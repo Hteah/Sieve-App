@@ -96,6 +96,15 @@ struct SampleRow: Codable, Identifiable, Hashable, Sendable, FetchableRecord {
         return tagNames.split(separator: "\u{1F}").map(String.init)
     }
 
+    // Distinct non-optional key paths the library table's sortable columns bind to. Only their
+    // identity matters — they map a header click back to a `SampleSort`; the visible row order
+    // still comes from the SQL query, so the nil handling here is never exercised.
+    var filenameSortKey: String { filename }
+    var durationSortKey: Double { durationSec ?? 0 }
+    var rateSortKey: Double { sampleRate ?? 0 }
+    var bitsSortKey: Int { bitDepth ?? 0 }
+    var ratingSortKey: Int { rating ?? 0 }
+
     // Equality/hashing skip the multi-KB `waveform` blob (compare its size instead) and the
     // 64-char hash strings. SwiftUI's Table calls `==` per row while diffing a re-sorted list,
     // and byte-comparing every row's waveform there is what made sorting large lists stall.

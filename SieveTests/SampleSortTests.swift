@@ -51,6 +51,8 @@ struct SampleSortTests {
         #expect(filter.sort == .name && filter.sortAscending)
         filter.select(.size)
         #expect(filter.sort == .size && !filter.sortAscending)  // size defaults to largest-first
+        filter.select(.duration)
+        #expect(filter.sort == .duration && !filter.sortAscending)  // duration defaults to longest-first
         filter.select(.rate)
         #expect(filter.sort == .rate && filter.sortAscending)
         #expect(filter.samePredicate(as: SampleFilter()))       // sort changes don't change the predicate

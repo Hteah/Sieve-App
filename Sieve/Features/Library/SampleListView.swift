@@ -34,7 +34,8 @@ struct SampleListView: View {
         VStack(spacing: 0) {
             FilterBar(model: model)
             Divider()
-            Table(model.rows, selection: $model.selection, columnCustomization: $columnCustomization) {
+            Table(model.rows, selection: $model.selection, sortOrder: sortComparators,
+                  columnCustomization: $columnCustomization) {
                 TableColumn("Waveform") { row in
                     WaveformCell(row: row) { fraction in
                         model.selection = [row.id]
@@ -45,47 +46,25 @@ struct SampleListView: View {
                 .customizationID("waveform")
                 .disabledCustomizationBehavior(.visibility)
 
-                TableColumn("Name") { row in
-                    VStack(alignment: .leading, spacing: 2) {
-                        HStack(spacing: 4) {
-                            if (env.player.currentSampleId == row.id && env.player.isPlaying)
-                                || env.editor.playingSampleId == row.id {
-                                Image(systemName: "speaker.wave.2.fill").foregroundStyle(.tint).font(.caption)
-                            }
-                            Text(row.filename).lineLimit(1)
-                            if row.status != .present {
-                                Image(systemName: "exclamationmark.triangle").foregroundStyle(.orange).font(.caption)
-                                    .help(row.status == .missing ? "File is missing" : "Volume not mounted")
-                            }
-                        }
-                        Text(row.parentDir.isEmpty ? (model.root(for: row.rootId)?.name ?? "") : row.parentDir)
-                            .font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
-                    // `.draggable` on a Table cell swallows the click that would select the
-                    // row, so select it here — unless a modifier means the user is extending
-                    // the native shift/⌘ selection.
-                    .simultaneousGesture(TapGesture().onEnded {
-                        if NSEvent.modifierFlags.isDisjoint(with: [.shift, .command]) {
-                            model.selection = [row.id]
-                        }
-                    })
-                    .draggable(SampleDrag(id: row.id,
-                                          fileURL: env.fileURL(for: row),
-                                          rootURL: env.rootURL(for: row.rootId),
-                                          filename: row.filename))
+                TableColumn("Name", value: \.filenameSortKey) { row in
+                    nameCell(row)
                 }
                 .width(min: 140, ideal: 260)
                 .customizationID("name")
 
-                TableColumn("Duration") { row in Text(Fmt.duration(row.durationSec)).monospacedDigit() }
-                    .width(60).customizationID("duration")
-                TableColumn("Rate") { row in Text(Fmt.sampleRate(row.sampleRate)) }
-                    .width(60).customizationID("rate")
-                TableColumn("Bits") { row in Text(row.bitDepth.map(String.init) ?? "–") }
-                    .width(32).customizationID("bits")
-                TableColumn("Rating") { row in
+                TableColumn("Duration", value: \.durationSortKey) { row in
+                    Text(Fmt.duration(row.durationSec)).monospacedDigit()
+                }
+                .width(60).customizationID("duration")
+                TableColumn("Rate", value: \.rateSortKey) { row in
+                    Text(Fmt.sampleRate(row.sampleRate))
+                }
+                .width(60).customizationID("rate")
+                TableColumn("Bits", value: \.bitsSortKey) { row in
+                    Text(row.bitDepth.map(String.init) ?? "–")
+                }
+                .width(32).customizationID("bits")
+                TableColumn("Rating", value: \.ratingSortKey) { row in
                     StarRatingView(rating: row.rating ?? 0) { r in
                         Task { try? await AnnotationStore(database: env.database).setRating(r, for: row) }
                     }
@@ -119,8 +98,10 @@ struct SampleListView: View {
                     Text(row.tags.joined(separator: ", ")).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 }
                 .width(min: 60, ideal: 140).customizationID("tags")
-                TableColumn("Size") { row in Text(Fmt.bytes(row.fileSize)).monospacedDigit() }
-                    .width(64).customizationID("size")
+                TableColumn("Size", value: \.fileSize) { row in
+                    Text(Fmt.bytes(row.fileSize)).monospacedDigit()
+                }
+                .width(64).customizationID("size")
             }
             // Re-sorting reshuffles nearly every row; diffing 800+ scrambled rows is what
             // stalled the UI. Keying the table to the sort makes SwiftUI rebuild it once
@@ -215,6 +196,76 @@ struct SampleListView: View {
     /// nowhere else (selection, rescans, tag edits still update in place).
     private var sortToken: String {
         "\(model.filter.sort.rawValue)-\(model.filter.sortAscending)"
+    }
+
+    /// Reflects `model.filter` into the table header's sort indicator and back. Clicking a new
+    /// column snaps to that field's default direction (`select`); clicking the active column
+    /// flips it. The toolbar Sort menu writes the same `model.filter`, so the two stay in sync.
+    /// SwiftUI never sorts `model.rows` itself — the visible order comes from the SQL query the
+    /// `model.filter` change triggers — so these comparators only carry the header state.
+    private var sortComparators: Binding<[KeyPathComparator<SampleRow>]> {
+        Binding(
+            get: {
+                let order: SortOrder = model.filter.sortAscending ? .forward : .reverse
+                let kp: KeyPathComparator<SampleRow> = switch model.filter.sort {
+                case .name, .path, .modified: KeyPathComparator(\.filenameSortKey, order: order)
+                case .duration: KeyPathComparator(\.durationSortKey, order: order)
+                case .size: KeyPathComparator(\.fileSize, order: order)
+                case .rating: KeyPathComparator(\.ratingSortKey, order: order)
+                case .rate: KeyPathComparator(\.rateSortKey, order: order)
+                case .bits: KeyPathComparator(\.bitsSortKey, order: order)
+                }
+                return [kp]
+            },
+            set: { new in
+                guard let c = new.first else { return }
+                let kp = c.keyPath as AnyKeyPath
+                let field: SampleSort
+                if kp == \SampleRow.durationSortKey { field = .duration }
+                else if kp == \SampleRow.rateSortKey { field = .rate }
+                else if kp == \SampleRow.bitsSortKey { field = .bits }
+                else if kp == \SampleRow.ratingSortKey { field = .rating }
+                else if kp == \SampleRow.fileSize { field = .size }
+                else { field = .name }
+                if field == model.filter.sort {
+                    model.filter.sortAscending = (c.order == .forward)
+                } else {
+                    model.filter.select(field)
+                }
+            }
+        )
+    }
+
+    @ViewBuilder
+    private func nameCell(_ row: SampleRow) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 4) {
+                if (env.player.currentSampleId == row.id && env.player.isPlaying)
+                    || env.editor.playingSampleId == row.id {
+                    Image(systemName: "speaker.wave.2.fill").foregroundStyle(.tint).font(.caption)
+                }
+                Text(row.filename).lineLimit(1)
+                if row.status != .present {
+                    Image(systemName: "exclamationmark.triangle").foregroundStyle(.orange).font(.caption)
+                        .help(row.status == .missing ? "File is missing" : "Volume not mounted")
+                }
+            }
+            Text(row.parentDir.isEmpty ? (model.root(for: row.rootId)?.name ?? "") : row.parentDir)
+                .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
+        // `.draggable` on a Table cell swallows the click that would select the row, so select
+        // it here — unless a modifier means the user is extending the native shift/⌘ selection.
+        .simultaneousGesture(TapGesture().onEnded {
+            if NSEvent.modifierFlags.isDisjoint(with: [.shift, .command]) {
+                model.selection = [row.id]
+            }
+        })
+        .draggable(SampleDrag(id: row.id,
+                              fileURL: env.fileURL(for: row),
+                              rootURL: env.rootURL(for: row.rootId),
+                              filename: row.filename))
     }
 
     private func applyResponsiveColumns(width: CGFloat) {

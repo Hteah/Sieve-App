@@ -42,8 +42,8 @@ enum SampleSort: String, CaseIterable, Sendable, Identifiable {
     /// The direction to snap to when the user first switches to this sort.
     var defaultAscending: Bool {
         switch self {
-        case .name, .path, .duration, .rate, .bits: true
-        case .size, .modified, .rating: false
+        case .name, .path, .rate, .bits: true
+        case .duration, .size, .modified, .rating: false   // duration: longest first
         }
     }
 
