@@ -39,10 +39,14 @@ struct ContentView: View {
                         if env.editor.isDirty {
                             pendingSwitch = PendingSwitch(row: row, previousId: oldId)
                         } else {
-                            // Debounce: only load into the editor once the user settles on a row.
                             followTask = Task {
-                                try? await Task.sleep(for: .milliseconds(250))
-                                guard !Task.isCancelled, model.primarySelection?.id == row.id else { return }
+                                // Debounce only for inline browsing; load immediately when the
+                                // dedicated editor window is open.
+                                if !env.editor.windowOpen {
+                                    try? await Task.sleep(for: .milliseconds(250))
+                                    guard !Task.isCancelled, model.primarySelection?.id == row.id else { return }
+                                }
+                                guard !Task.isCancelled else { return }
                                 await env.editor.open(row: row)
                             }
                         }

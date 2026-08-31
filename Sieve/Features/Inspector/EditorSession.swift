@@ -109,6 +109,7 @@ final class EditorSession {
         selection = nil
         cursor = 0
         loadError = nil
+        clip = nil; mip = nil; thumbnail = nil   // show the loading state, not the previous file
 
         guard row.status == .present,
               let rootURL = env.rootURL(for: row.rootId),
