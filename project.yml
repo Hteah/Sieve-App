@@ -39,14 +39,12 @@ targets:
         LSApplicationCategoryType: public.app-category.music
         NSHumanReadableCopyright: ""
         LSMinimumSystemVersion: "26.0"
-        NSMicrophoneUsageDescription: "Sieve records audio you capture with the editor's Record button."
     entitlements:
       path: Sieve/App/Sieve.entitlements
       properties:
         com.apple.security.app-sandbox: true
         com.apple.security.files.user-selected.read-write: true
         com.apple.security.files.bookmarks.app-scope: true
-        com.apple.security.device.audio-input: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.arlo.Sieve

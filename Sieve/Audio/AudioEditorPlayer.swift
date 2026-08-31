@@ -62,12 +62,32 @@ final class AudioEditorPlayer {
 
     private func prepareEngine(format: AVAudioFormat) throws {
         if currentFormat != format {
-            engine.stop()
+            // Reconnect without stopping the engine, so an output-capture tap on the mixer
+            // (the recorder) isn't interrupted when a new clip's format comes through.
             engine.disconnectNodeOutput(node)
             engine.connect(node, to: engine.mainMixerNode, format: format)
             currentFormat = format
-            engine.prepare()
+            if !engine.isRunning { engine.prepare() }
         }
+    }
+
+    // MARK: Output capture (used by AudioRecorder to record what the editor plays)
+
+    var captureFormat: AVAudioFormat { engine.mainMixerNode.outputFormat(forBus: 0) }
+
+    func beginOutputCapture(bufferSize: AVAudioFrameCount,
+                            _ block: @escaping @Sendable (AVAudioPCMBuffer, AVAudioTime) -> Void) throws {
+        let mixer = engine.mainMixerNode
+        if !engine.isRunning {
+            engine.prepare()
+            try engine.start()
+        }
+        mixer.removeTap(onBus: 0)
+        mixer.installTap(onBus: 0, bufferSize: bufferSize, format: mixer.outputFormat(forBus: 0), block: block)
+    }
+
+    func endOutputCapture() {
+        engine.mainMixerNode.removeTap(onBus: 0)
     }
 
     /// Starts the engine; if it fails (e.g. the recorder just had the device), fully resets the

@@ -49,7 +49,7 @@ final class EditorSession {
 
     init(env: AppEnvironment) {
         self.env = env
-        self.recorder = AudioRecorder(env: env)
+        self.recorder = AudioRecorder(env: env, player: player)
     }
 
     /// Starts/stops capturing input to a new WAV. Editor playback is left alone so you can play

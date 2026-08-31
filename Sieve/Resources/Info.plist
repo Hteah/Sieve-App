@@ -26,7 +26,5 @@
 	<string>26.0</string>
 	<key>NSHumanReadableCopyright</key>
 	<string></string>
-	<key>NSMicrophoneUsageDescription</key>
-	<string>Sieve records audio you capture with the editor's Record button.</string>
 </dict>
 </plist>

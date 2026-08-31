@@ -4,14 +4,14 @@ import Foundation
 import Observation
 import os
 
-/// Captures system audio input to a fresh 24-bit WAV in the user's recordings folder. Standalone —
-/// it never touches the editor's clip. Tap buffers stream to a detached writer so nothing is held
-/// in memory beyond the in-flight queue.
+/// Records whatever the editor is playing — the loaded file as you seek, loop and jump around —
+/// to a fresh 24-bit WAV in the recordings folder. It taps `AudioEditorPlayer`'s mix bus, so
+/// silence during pauses is captured as silence. Standalone: it never changes the loaded clip.
 @MainActor
 @Observable
 final class AudioRecorder {
     private unowned let env: AppEnvironment
-    private let engine = AVAudioEngine()
+    private unowned let player: AudioEditorPlayer
     private let levelBox = LevelBox()
     private var continuation: AsyncStream<RecChunk>.Continuation?
     private var writerTask: Task<Void, Never>?
@@ -28,7 +28,10 @@ final class AudioRecorder {
     private nonisolated static let log = Logger(subsystem: "com.arlo.Sieve", category: "recorder")
     private static let maxSeconds: TimeInterval = 60 * 60
 
-    init(env: AppEnvironment) { self.env = env }
+    init(env: AppEnvironment, player: AudioEditorPlayer) {
+        self.env = env
+        self.player = player
+    }
 
     func toggle() {
         if isRecording { stop() } else { Task { await start() } }
@@ -39,15 +42,15 @@ final class AudioRecorder {
         lastError = nil
         lastRecordingURL = nil
 
-        guard await Self.requestMicrophone() else {
-            lastError = "Microphone access is off. Turn it on in System Settings › Privacy & Security › Microphone."
-            return
-        }
         guard let folder = resolveFolder() else { return }   // user cancelled the folder picker
 
-        let format = engine.inputNode.outputFormat(forBus: 0)
-        guard format.sampleRate > 0, format.channelCount > 0 else {
-            lastError = "No audio input is available."
+        env.player.stop()   // keep the list-preview player out of the recording
+
+        let format = player.captureFormat
+        let sampleRate = format.sampleRate
+        let channels = Int(format.channelCount)
+        guard sampleRate > 0, channels > 0 else {
+            lastError = "The editor's audio output isn't ready yet."
             return
         }
 
@@ -60,33 +63,27 @@ final class AudioRecorder {
 
         let (stream, cont) = AsyncStream<RecChunk>.makeStream(bufferingPolicy: .unbounded)
         continuation = cont
-        let sampleRate = format.sampleRate
-        let channels = Int(format.channelCount)
         writerTask = Task.detached(priority: .userInitiated) { [weak self] in
             await Self.runWriter(stream: stream, dest: dest, sampleRate: sampleRate, channels: channels)
             await self?.writerFinished(url: dest)
         }
 
-        engine.inputNode.installTap(onBus: 0, bufferSize: 4096, format: format) { @Sendable [levelBox, cont] buffer, _ in
-            guard let data = buffer.floatChannelData, buffer.frameLength > 0 else { return }
-            let n = Int(buffer.frameLength)
-            let ch = Int(buffer.format.channelCount)
-            var frames = [[Float]](repeating: [], count: ch)
-            var peak: Float = 0
-            for c in 0..<ch {
-                let p = data[c]
-                frames[c] = Array(UnsafeBufferPointer(start: p, count: n))
-                for i in 0..<n { let a = abs(p[i]); if a > peak { peak = a } }
-            }
-            levelBox.bump(peak)
-            cont.yield(RecChunk(frames: frames))
-        }
-
         do {
-            engine.prepare()
-            try engine.start()
+            try player.beginOutputCapture(bufferSize: 4096) { @Sendable [levelBox, cont] buffer, _ in
+                guard let data = buffer.floatChannelData, buffer.frameLength > 0 else { return }
+                let n = Int(buffer.frameLength)
+                let ch = Int(buffer.format.channelCount)
+                var frames = [[Float]](repeating: [], count: ch)
+                var peak: Float = 0
+                for c in 0..<ch {
+                    let p = data[c]
+                    frames[c] = Array(UnsafeBufferPointer(start: p, count: n))
+                    for i in 0..<n { let a = abs(p[i]); if a > peak { peak = a } }
+                }
+                levelBox.bump(peak)
+                cont.yield(RecChunk(frames: frames))
+            }
         } catch {
-            engine.inputNode.removeTap(onBus: 0)
             cont.finish()
             releaseScope()
             lastError = "Couldn't start recording: \(error.localizedDescription)"
@@ -103,8 +100,7 @@ final class AudioRecorder {
     func stop() {
         guard isRecording else { return }
         isRecording = false
-        engine.inputNode.removeTap(onBus: 0)
-        engine.stop()
+        player.endOutputCapture()
         continuation?.finish()
         continuation = nil
         timer?.invalidate(); timer = nil
@@ -192,14 +188,6 @@ final class AudioRecorder {
         formatter.dateFormat = "yyyy-MM-dd 'at' HH.mm.ss"
         return "Recording \(formatter.string(from: Date())).wav"
     }
-
-    private static func requestMicrophone() async -> Bool {
-        switch AVCaptureDevice.authorizationStatus(for: .audio) {
-        case .authorized: return true
-        case .notDetermined: return await AVCaptureDevice.requestAccess(for: .audio)
-        default: return false
-        }
-    }
 }
 
 /// Sendable, de-interleaved snapshot of one tap buffer.
@@ -207,7 +195,7 @@ private struct RecChunk: Sendable {
     var frames: [[Float]]
 }
 
-/// Thread-safe latch for the most recent input peak, written from the audio tap.
+/// Thread-safe latch for the most recent output peak, written from the audio tap.
 private final class LevelBox: Sendable {
     private let state = OSAllocatedUnfairLock<Float>(initialState: 0)
 

@@ -179,7 +179,7 @@ struct AudioEditorView: View {
             Image(systemName: recorder.isRecording ? "stop.fill" : "record.circle")
         }
         .tint(.red)
-        .help(recorder.isRecording ? "Stop recording" : "Record from the audio input to a new WAV")
+        .help(recorder.isRecording ? "Stop recording" : "Record the editor's playback to a new WAV")
     }
 
     @ViewBuilder private var recordingBanner: some View {

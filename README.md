@@ -10,8 +10,9 @@ A lightweight native macOS app for organizing music-production sample collection
 - **Edit** in the inspector's Edit tab (or a pop-out window): drag-select a region, then trim, delete,
   normalize, amplify, reverse, fade, silence, cut/copy/paste, with undo/redo and looped selection playback.
   Save to a new WAV or replace the original in place.
-- **Record** from the audio input straight to a 24-bit WAV in a folder you pick once (Record button in the
-  editor, with a live input meter). Auto-named per take; shows up in the library if the folder is indexed.
+- **Record** the editor's playback — the file as you seek, loop and jump around — straight to a 24-bit WAV in
+  a folder you pick once (Record button in the editor, with a live meter). Auto-named per take; shows up in
+  the library if the folder is indexed.
 - **Tag, rate, favorite, annotate.** Metadata is keyed by the audio content hash, so it follows files that are
   renamed or moved, and identical copies share it.
 - **Find exact duplicates** across packs (WAV vs AIFF vs re-tagged copies of the same audio all match). Choose
