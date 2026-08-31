@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ContentView: View {
     @Environment(AppEnvironment.self) private var env
+    @Environment(\.openWindow) private var openWindow
     @State private var model: LibraryViewModel?
     @AppStorage("showInspector") private var showInspector = true
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
@@ -34,6 +35,7 @@ struct ContentView: View {
                     }
                     .onChange(of: model.primarySelection?.id) { oldId, _ in
                         followTask?.cancel()
+                        env.editor.noteListSelection(model.primarySelection)
                         guard env.editor.isActive, let row = model.primarySelection,
                               row.id != env.editor.source?.sampleId else { return }
                         if env.editor.isDirty {
@@ -134,6 +136,15 @@ struct ContentView: View {
             .keyboardShortcut("s", modifiers: [.control, .command])
 
             Spacer(minLength: 0)
+
+            Button {
+                env.editor.noteListSelection(model?.primarySelection)
+                openWindow(id: "audio-editor")
+            } label: {
+                Image(systemName: "waveform")
+            }
+            .help("Open the wave editor window")
+            .padding(.trailing, 12)
 
             Button { toggleInspector() } label: {
                 Image(systemName: showInspector ? "sidebar.trailing" : "sidebar.right")

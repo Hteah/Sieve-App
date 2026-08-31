@@ -3,6 +3,7 @@ import UniformTypeIdentifiers
 
 struct SampleListView: View {
     @Environment(AppEnvironment.self) private var env
+    @Environment(\.openWindow) private var openWindow
     @Bindable var model: LibraryViewModel
     @AppStorage("autoPreview") private var autoPreview = true
     @State private var tableWidth: CGFloat = 900
@@ -101,6 +102,11 @@ struct SampleListView: View {
                     Button("Reveal in Finder") { env.revealInFinder(first) }
                     Button(env.audioEditorName.map { "Open in \($0)" } ?? "Open in Audio Editor…") {
                         env.openInAudioEditor(first)
+                    }
+                    .disabled(first.status != .present)
+                    Button("Open in Wave Editor") {
+                        env.editor.noteListSelection(first)
+                        openWindow(id: "audio-editor")
                     }
                     .disabled(first.status != .present)
                     Divider()

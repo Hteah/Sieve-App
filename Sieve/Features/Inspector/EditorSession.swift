@@ -104,9 +104,14 @@ final class EditorSession {
 
     // MARK: Lifecycle / viewport refcount
 
+    /// The list's current selection, tracked even while the editor is inactive so the pop-out
+    /// window (which has no `LibraryViewModel`) can load it on open.
+    @ObservationIgnored private(set) var lastListRow: SampleRow?
+    func noteListSelection(_ row: SampleRow?) { lastListRow = row }
+
     func retain(currentRow: SampleRow?) {
         activeCount += 1
-        guard activeCount == 1, let row = currentRow else { return }
+        guard activeCount == 1, let row = currentRow ?? lastListRow else { return }
         if source?.sampleId != row.id || clip == nil {
             Task { await open(row: row) }
         }
