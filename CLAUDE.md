@@ -9,8 +9,10 @@ sample folders, shows amplitude-accurate waveforms, lets the user tag/rate/annot
 duplicates. Indexing never touches files on disk; the only writes are explicit user actions — Trash/Move in the
 Duplicates view, "Convert Sample Rate / Bit Depth" on the list selection (`Audio/AudioConverter`), and the
 inspector's Edit tab / pop-out editor window (`Features/Inspector/EditorSession` + `Audio/AudioClip`, in-memory
-edit then Save As New or replace in place). File writes go through `Audio/AudioFileIO` (temp → validate → atomic
-replace; a non-WAV source becomes a sibling `.wav`).
+edit then Save As New or replace in place), and the editor's Record button (`Audio/AudioRecorder` — captures
+the audio input to a new 24-bit WAV in a remembered folder; needs the `device.audio-input` entitlement +
+`NSMicrophoneUsageDescription`). File writes go through `Audio/AudioFileIO` (temp → validate → atomic replace;
+a non-WAV source becomes a sibling `.wav`).
 
 ## Build, test, run
 

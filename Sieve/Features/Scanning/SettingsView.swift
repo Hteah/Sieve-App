@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct SettingsView: View {
@@ -6,6 +7,7 @@ struct SettingsView: View {
     @AppStorage("editorNormalizeDb") private var normalizeDb = -1.0
     @AppStorage("editorMaxMinutes") private var editorMaxMinutes = 10
     @Environment(AppEnvironment.self) private var env
+    @State private var recordingsFolder: URL?
 
     var body: some View {
         Form {
@@ -44,8 +46,41 @@ struct SettingsView: View {
             }
             Text("The inspector's Edit tab loads the whole file into memory; longer files stay read-only.")
                 .font(.caption).foregroundStyle(.secondary)
+
+            Divider()
+
+            LabeledContent("Recordings folder") {
+                HStack(spacing: 8) {
+                    Text(recordingsFolder?.lastPathComponent ?? "Not set")
+                        .foregroundStyle(recordingsFolder == nil ? AnyShapeStyle(.secondary) : AnyShapeStyle(.primary))
+                        .lineLimit(1).truncationMode(.middle)
+                    Spacer()
+                    Button(recordingsFolder == nil ? "Choose…" : "Change…") { chooseRecordingsFolder() }
+                    if recordingsFolder != nil {
+                        Button("Clear", role: .destructive) {
+                            env.bookmarks.clearRecordingsFolder()
+                            recordingsFolder = nil
+                        }
+                    }
+                }
+            }
+            Text("Where the editor's Record button saves each take.")
+                .font(.caption).foregroundStyle(.secondary)
         }
         .padding(20)
         .frame(width: 420)
+        .onAppear { recordingsFolder = env.bookmarks.lastRecordingsFolder() }
+    }
+
+    private func chooseRecordingsFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = true
+        panel.prompt = "Use Folder"
+        panel.message = "Choose a folder to save recordings into."
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        env.bookmarks.rememberRecordingsFolder(url)
+        recordingsFolder = url
     }
 }

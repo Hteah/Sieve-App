@@ -68,6 +68,25 @@ final class BookmarkStore: Sendable {
               let r = try? resolve(data) else { return nil }
         return r.url
     }
+
+    // Folder the editor writes recordings into (bookmark stored in UserDefaults).
+    private static let recordingsFolderKey = "recordingsFolderBookmark"
+
+    func rememberRecordingsFolder(_ url: URL) {
+        if let data = try? makeBookmark(for: url) {
+            UserDefaults.standard.set(data, forKey: Self.recordingsFolderKey)
+        }
+    }
+
+    func lastRecordingsFolder() -> URL? {
+        guard let data = UserDefaults.standard.data(forKey: Self.recordingsFolderKey),
+              let r = try? resolve(data) else { return nil }
+        return r.url
+    }
+
+    func clearRecordingsFolder() {
+        UserDefaults.standard.removeObject(forKey: Self.recordingsFolderKey)
+    }
 }
 
 /// Runs `body` while holding security-scoped access to `url`. Balanced start/stop.

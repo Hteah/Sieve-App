@@ -21,6 +21,7 @@ struct AudioEditorView: View {
     @State private var preventClip = true
     @State private var showAmplify = false
     @State private var showReplaceConfirm = false
+    @State private var showRecordingSaved = false
 
     private var session: EditorSession { env.editor }
 
@@ -38,12 +39,18 @@ struct AudioEditorView: View {
                 header
                 waveform
                 transport
+                recordingBanner
                 Divider()
                 operations
                 saveRow
             }
         }
         .padding(10)
+        .onChange(of: session.recorder.lastRecordingURL) { _, new in
+            guard new != nil else { return }
+            showRecordingSaved = true
+            Task { try? await Task.sleep(for: .seconds(6)); showRecordingSaved = false }
+        }
         .background {
             if isPopOut { WindowLevelSetter(level: floatOnTop ? .floating : .normal) }
         }
@@ -142,22 +149,61 @@ struct AudioEditorView: View {
             }
             .help(session.hasSelection ? "Play the selection" : "Play from the cursor")
             .modifier(SpaceToToggle(enabled: isPopOut))
+            .disabled(session.recorder.isRecording)
             Toggle(isOn: Binding(get: { session.looping }, set: { session.looping = $0 })) {
                 Image(systemName: "repeat")
             }
             .toggleStyle(.button)
             .help(session.hasSelection ? "Loop the selection" : "Loop")
+            .disabled(session.recorder.isRecording)
 
             Text(Fmt.duration(Double(mirroredPlayhead ?? 0) / max(1, session.sampleRate)))
                 .font(.caption).monospacedDigit().foregroundStyle(.secondary)
 
             Spacer()
 
-            Text("Click to set the play point · drag to select · scroll to zoom")
-                .font(.caption2).foregroundStyle(.tertiary)
+            recordControls
         }
         .buttonStyle(.bordered)
         .controlSize(.small)
+    }
+
+    @ViewBuilder private var recordControls: some View {
+        let recorder = session.recorder
+        if recorder.isRecording {
+            Image(systemName: "waveform", variableValue: Double(min(1, max(0, recorder.level))))
+                .foregroundStyle(.red)
+                .symbolEffect(.pulse, isActive: true)
+            Text(Self.mmss(recorder.elapsed))
+                .font(.caption).monospacedDigit().foregroundStyle(.red)
+        }
+        Button { session.toggleRecording() } label: {
+            Image(systemName: recorder.isRecording ? "stop.fill" : "record.circle")
+        }
+        .tint(.red)
+        .help(recorder.isRecording ? "Stop recording" : "Record from the audio input to a new WAV")
+    }
+
+    @ViewBuilder private var recordingBanner: some View {
+        if let error = session.recorder.lastError {
+            Label(error, systemImage: "exclamationmark.triangle")
+                .font(.caption).foregroundStyle(.orange)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
+        } else if showRecordingSaved, let url = session.recorder.lastRecordingURL {
+            HStack(spacing: 6) {
+                Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                Text("Saved \(url.lastPathComponent)").font(.caption).lineLimit(1)
+                Button("Reveal") { NSWorkspace.shared.activateFileViewerSelecting([url]) }
+                    .buttonStyle(.link).controlSize(.small)
+                Spacer()
+            }
+        }
+    }
+
+    private static func mmss(_ t: TimeInterval) -> String {
+        let s = Int(t.rounded())
+        return String(format: "%d:%02d", s / 60, s % 60)
     }
 
     // MARK: Operations

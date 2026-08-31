@@ -21,6 +21,7 @@ final class EditorSession {
 
     private unowned let env: AppEnvironment
     let player = AudioEditorPlayer()
+    let recorder: AudioRecorder
 
     private(set) var source: Source?
     private(set) var clip: AudioClip?
@@ -46,7 +47,21 @@ final class EditorSession {
 
     static let log = Logger(subsystem: "com.arlo.Sieve", category: "editor")
 
-    init(env: AppEnvironment) { self.env = env }
+    init(env: AppEnvironment) {
+        self.env = env
+        self.recorder = AudioRecorder(env: env)
+    }
+
+    /// Starts/stops capturing input to a new WAV. Stops playback first so nothing bleeds in.
+    func toggleRecording() {
+        if recorder.isRecording {
+            recorder.stop()
+        } else {
+            player.stop()
+            env.player.stop()
+            Task { await recorder.start() }
+        }
+    }
 
     private enum LoadOutcome: Sendable { case loaded(AudioClip); case failure(String) }
     private enum WriteOutcome: Sendable { case url(URL); case ok; case failure(String) }
