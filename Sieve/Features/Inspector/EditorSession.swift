@@ -115,7 +115,8 @@ final class EditorSession {
 
     func retain(currentRow: SampleRow?) {
         activeCount += 1
-        guard activeCount == 1, let row = currentRow ?? lastListRow else { return }
+        // Don't replace a clip that has unsaved edits just because a viewport mounted.
+        guard activeCount == 1, !isDirty, let row = currentRow ?? lastListRow else { return }
         if source?.sampleId != row.id || clip == nil {
             Task { await open(row: row) }
         }

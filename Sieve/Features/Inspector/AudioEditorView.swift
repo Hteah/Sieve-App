@@ -93,6 +93,9 @@ struct AudioEditorView: View {
                         Circle().fill(.orange).frame(width: 7, height: 7)
                     }
                     Text(session.source?.url.lastPathComponent ?? "").font(.headline).lineLimit(1)
+                    if session.isDirty {
+                        Text("· unsaved").font(.caption).foregroundStyle(.orange)
+                    }
                 }
                 Text(readout).font(.caption).foregroundStyle(.secondary)
             }
