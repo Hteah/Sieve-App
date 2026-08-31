@@ -201,29 +201,59 @@ struct PeakMip: Sendable {
 
     init(_ clip: AudioClip, base: Int = 256, levelCount: Int = 6) {
         frameCount = clip.frameCount
-        var levels: [Level] = []
-        var stride = max(1, base)
-        for _ in 0..<levelCount {
-            guard clip.frameCount / stride >= 2 else { break }
-            let bins = (clip.frameCount + stride - 1) / stride
-            var rows: [[SIMD2<Float>]] = []
-            for ch in clip.channels {
-                var row = [SIMD2<Float>](repeating: SIMD2(0, 0), count: bins)
+        let baseStride = max(1, base)
+        guard clip.channelCount > 0, clip.frameCount / baseStride >= 2 else {
+            self.levels = []
+            return
+        }
+
+        // Level 0 is the only pass over raw samples…
+        var stride = baseStride
+        var current: [[SIMD2<Float>]] = clip.channels.map { channel in
+            let bins = (channel.count + stride - 1) / stride
+            var row = [SIMD2<Float>](repeating: SIMD2(0, 0), count: bins)
+            channel.withUnsafeBufferPointer { p in
                 for b in 0..<bins {
-                    let lo = b * stride, hi = min(lo + stride, ch.count)
+                    let lo = b * stride
+                    let hi = min(lo + stride, p.count)
                     guard lo < hi else { continue }
-                    var mn = ch[lo], mx = ch[lo]
-                    for i in (lo + 1)..<hi {
-                        let v = ch[i]
+                    var mn = p[lo], mx = p[lo]
+                    var i = lo + 1
+                    while i < hi {
+                        let v = p[i]
                         if v < mn { mn = v }
                         if v > mx { mx = v }
+                        i += 1
                     }
                     row[b] = SIMD2(mn, mx)
                 }
-                rows.append(row)
             }
-            levels.append(Level(stride: stride, minMax: rows))
+            return row
+        }
+        var levels = [Level(stride: stride, minMax: current)]
+
+        // …each coarser level just decimates the one above it 4×.
+        for _ in 1..<levelCount {
+            guard (current.first?.count ?? 0) >= 8 else { break }
             stride *= 4
+            current = current.map { row in
+                let bins = (row.count + 3) / 4
+                var out = [SIMD2<Float>](repeating: SIMD2(0, 0), count: bins)
+                for b in 0..<bins {
+                    let lo = b * 4
+                    let hi = min(lo + 4, row.count)
+                    var mn = row[lo].x, mx = row[lo].y
+                    var i = lo + 1
+                    while i < hi {
+                        mn = min(mn, row[i].x)
+                        mx = max(mx, row[i].y)
+                        i += 1
+                    }
+                    out[b] = SIMD2(mn, mx)
+                }
+                return out
+            }
+            levels.append(Level(stride: stride, minMax: current))
         }
         self.levels = levels
     }

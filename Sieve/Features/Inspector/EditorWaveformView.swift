@@ -166,14 +166,17 @@ struct EditorWaveformView: View {
                         }
                     }
                 } else if c < clip.channels.count {
+                    // No pyramid yet (just-loaded / mid-edit): scan raw, but sub-sample when a
+                    // column covers a huge span so this stays smooth until the mip lands.
                     let ch = clip.channels[c]
+                    let step = max(1, (f1 - f0) / 2048)
                     lo = ch[f0]; hi = ch[f0]
-                    var i = f0 + 1
+                    var i = f0 + step
                     while i < f1 {
                         let v = ch[i]
                         if v < lo { lo = v }
                         if v > hi { hi = v }
-                        i += 1
+                        i += step
                     }
                 }
                 let x = CGFloat(px) + 0.5
