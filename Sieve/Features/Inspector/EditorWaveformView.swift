@@ -11,6 +11,8 @@ struct EditorWaveformView: View {
     var playheadFrame: Int?
     /// Called with the clicked frame when the user clicks (not drags) the waveform.
     var onClickSeek: ((Int) -> Void)? = nil
+    /// Called when a drag-selection finishes (the selection binding is already updated).
+    var onSelectionCommitted: (() -> Void)? = nil
     /// Changes when a different file is loaded; resets the zoom/scroll window.
     var resetToken: AnyHashable?
 
@@ -94,6 +96,8 @@ struct EditorWaveformView: View {
             if let a = dragAnchor, abs(a - f) <= max(1, Int(3 * framesPerPixel)) {
                 selection = nil          // a click clears the selection…
                 onClickSeek?(f)          // …and moves the playhead here
+            } else if selection != nil {
+                onSelectionCommitted?()  // a real drag-selection is now in place
             }
             dragAnchor = nil
         }
