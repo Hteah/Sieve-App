@@ -104,6 +104,7 @@ enum LibraryScope: Hashable, Sendable {
     case duplicates
     case root(Int64)
     case folder(rootId: Int64, parentDir: String)
+    case group(Int64)
     case tag(Int64)
 }
 
@@ -156,6 +157,8 @@ enum Queries {
             wheres.append("rootId = \(rootId)")
         case .folder(let rootId, let parentDir):
             wheres.append("rootId = \(rootId) AND (parentDir = \(parentDir) OR parentDir LIKE \(parentDir + "/%"))")
+        case .group(let groupId):
+            wheres.append("status != 'unavailable' AND rootId IN (SELECT id FROM root WHERE groupId = \(groupId))")
         case .tag(let tagId):
             wheres.append("annotationId IN (SELECT annotationId FROM annotation_tag WHERE tagId = \(tagId))")
         }

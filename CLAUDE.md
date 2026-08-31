@@ -44,9 +44,10 @@ Database lives at `~/Library/Containers/com.arlo.Sieve/Data/Library/Application 
 `@Environment(AppEnvironment.self)`. `LibraryViewModel` is created by `ContentView` and drives sidebar + table.
 
 **Persistence (GRDB, only dependency):** schema in `Persistence/AppDatabase.swift` (`migrator`). Key tables:
-`root` (security-scoped bookmark per user-added folder), `sample` (one row per file; `status` is
-`present | missing | unavailable`; rows are never deleted by scans, only by "Purge Missing"), `sample_fts` (FTS5,
-synced by triggers), `tag`, `annotation`, `annotation_tag`, `file_op_log`. The SQL view
+`root` (security-scoped bookmark per user-added folder; `groupId` → `folder_group`), `folder_group` (named,
+user-orderable collections of roots shown as collapsible sidebar sections), `sample` (one row per file;
+`status` is `present | missing | unavailable`; rows are never deleted by scans, only by "Purge Missing"),
+`sample_fts` (FTS5, synced by triggers), `tag`, `annotation`, `annotation_tag`, `file_op_log`. The SQL view
 `sample_with_annotation` joins samples to annotations and is what the UI reads (`SampleRow`).
 
 **Annotations are keyed by content hash, not path.** `annotation.contentHash` = `sample.audioHash ?? fileHash`,

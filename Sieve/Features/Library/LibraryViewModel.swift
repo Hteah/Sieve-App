@@ -30,6 +30,7 @@ final class LibraryViewModel {
     private(set) var showsDuplicates = false
     private(set) var rows: [SampleRow] = []
     private(set) var roots: [Root] = []
+    private(set) var groups: [FolderGroup] = []
     private(set) var folderTrees: [Int64: [Queries.FolderNode]] = [:]
     private(set) var tags: [Queries.TagCount] = []
     private(set) var isLoading = false
@@ -128,21 +129,36 @@ final class LibraryViewModel {
         }
     }
 
+    private struct SidebarData: Sendable {
+        var roots: [Root]
+        var groups: [FolderGroup]
+        var trees: [Int64: [Queries.FolderNode]]
+        var tags: [Queries.TagCount]
+    }
+
     private func startSidebarObservation() {
-        let observation = ValueObservation.tracking { db -> ([Root], [Int64: [Queries.FolderNode]], [Queries.TagCount]) in
+        let observation = ValueObservation.tracking { db -> SidebarData in
             let roots = try Root.order(Column("name").collating(.localizedCaseInsensitiveCompare)).fetchAll(db)
+            let groups = try FolderGroup
+                .order(Column("sortOrder"), Column("name").collating(.localizedCaseInsensitiveCompare))
+                .fetchAll(db)
             var trees: [Int64: [Queries.FolderNode]] = [:]
             for r in roots { if let id = r.id { trees[id] = try Queries.folderTree(db: db, rootId: id) } }
-            let tags = try Queries.tagCounts(db: db)
-            return (roots, trees, tags)
+            return SidebarData(roots: roots, groups: groups, trees: trees, tags: try Queries.tagCounts(db: db))
         }
         sidebarTask = Task { [weak self, database] in
             do {
-                for try await (roots, trees, tags) in observation.values(in: database.reader) {
+                for try await data in observation.values(in: database.reader) {
                     guard let self else { return }
-                    self.roots = roots
-                    self.folderTrees = trees
-                    self.tags = tags
+                    self.roots = data.roots
+                    self.groups = data.groups
+                    self.folderTrees = data.trees
+                    self.tags = data.tags
+                    // Don't leave a filter pointing at a group that no longer exists.
+                    if case .group(let gid) = self.filter.scope,
+                       !data.groups.contains(where: { $0.id == gid }) {
+                        self.filter.scope = .all
+                    }
                 }
             } catch {
                 Self.log.error("sidebar observation failed: \(error, privacy: .public)")

@@ -4,6 +4,23 @@ struct SidebarView: View {
     @Environment(AppEnvironment.self) private var env
     @Bindable var model: LibraryViewModel
     @State private var rootToRemove: Root?
+    @State private var collapsedGroups: Set<Int64> = []
+    @State private var groupSheet: GroupSheet?
+    @State private var groupNameDraft = ""
+
+    private enum GroupSheet: Identifiable {
+        case create(assignRoot: Int64?)
+        case rename(FolderGroup)
+        var id: String {
+            switch self {
+            case .create(let r): "create-\(r.map(String.init) ?? "")"
+            case .rename(let g): "rename-\(g.id ?? 0)"
+            }
+        }
+        var isRename: Bool { if case .rename = self { true } else { false } }
+    }
+
+    private var groupStore: FolderGroupStore { FolderGroupStore(database: env.database) }
 
     var body: some View {
         List(selection: scopeBinding) {
@@ -13,25 +30,34 @@ struct SidebarView: View {
                 Label("Duplicates", systemImage: "doc.on.doc").tag(LibraryScope.duplicates)
                 Label("Missing", systemImage: "questionmark.folder").tag(LibraryScope.missing)
             }
+
             Section("Folders") {
-                ForEach(model.roots) { root in
-                    if let id = root.id {
-                        DisclosureGroup {
-                            OutlineGroup(model.folderTrees[id] ?? [], children: \.childrenOrNil) { node in
-                                Label(node.name, systemImage: "folder")
-                                    .tag(LibraryScope.folder(rootId: node.rootId, parentDir: node.path))
-                            }
+                ForEach(model.groups) { group in
+                    if let gid = group.id {
+                        DisclosureGroup(isExpanded: expansion(for: gid)) {
+                            ForEach(roots(in: gid)) { root in rootRow(root) }
                         } label: {
-                            rootLabel(root, id: id)
-                                .tag(LibraryScope.root(id))
+                            groupLabel(group, id: gid).tag(LibraryScope.group(gid))
                         }
                     }
                 }
+
+                ForEach(ungroupedRoots) { root in rootRow(root) }
+
                 Button { Task { await env.addRootViaPanel() } } label: {
                     Label("Add Folder…", systemImage: "plus")
                 }
                 .buttonStyle(.plain).foregroundStyle(.secondary)
+
+                Button {
+                    groupNameDraft = ""
+                    groupSheet = .create(assignRoot: nil)
+                } label: {
+                    Label("New Group…", systemImage: "folder.badge.plus")
+                }
+                .buttonStyle(.plain).foregroundStyle(.secondary)
             }
+
             Section("Tags") {
                 ForEach(model.tags) { tag in
                     HStack {
@@ -65,10 +91,30 @@ struct SidebarView: View {
         } message: {
             Text("Files on disk are not touched. Tags and ratings keyed by content are kept.")
         }
+        .alert(groupSheet?.isRename == true ? "Rename Group" : "New Group",
+               isPresented: Binding(get: { groupSheet != nil }, set: { if !$0 { groupSheet = nil } }),
+               presenting: groupSheet) { sheet in
+            TextField("Name", text: $groupNameDraft)
+            Button("Cancel", role: .cancel) { groupSheet = nil }
+            Button(sheet.isRename ? "Rename" : "Create") { commitGroupSheet(sheet) }
+        }
     }
 
-    private var scopeBinding: Binding<LibraryScope?> {
-        Binding(get: { model.filter.scope }, set: { if let s = $0 { model.filter.scope = s } })
+    // MARK: Rows
+
+    @ViewBuilder
+    private func rootRow(_ root: Root) -> some View {
+        if let id = root.id {
+            DisclosureGroup {
+                OutlineGroup(model.folderTrees[id] ?? [], children: \.childrenOrNil) { node in
+                    Label(node.name, systemImage: "folder")
+                        .tag(LibraryScope.folder(rootId: node.rootId, parentDir: node.path))
+                }
+            } label: {
+                rootLabel(root, id: id)
+                    .tag(LibraryScope.root(id))
+            }
+        }
     }
 
     @ViewBuilder
@@ -90,7 +136,77 @@ struct SidebarView: View {
                 if let url = env.rootURL(for: id) { withSecurityScope(url) { NSWorkspace.shared.activateFileViewerSelecting([url]) } }
             }
             Divider()
+            Menu("Move to Group") {
+                ForEach(model.groups) { group in
+                    if let gid = group.id {
+                        Button(group.name) { Task { try? await groupStore.assign(rootId: id, to: gid) } }
+                            .disabled(root.groupId == gid)
+                    }
+                }
+                if !model.groups.isEmpty { Divider() }
+                Button("None") { Task { try? await groupStore.assign(rootId: id, to: nil) } }
+                    .disabled(root.groupId == nil)
+                Button("New Group…") {
+                    groupNameDraft = ""
+                    groupSheet = .create(assignRoot: id)
+                }
+            }
+            Divider()
             Button("Remove from Library…", role: .destructive) { rootToRemove = root }
+        }
+    }
+
+    private func groupLabel(_ group: FolderGroup, id: Int64) -> some View {
+        let count = roots(in: id).reduce(0) { $0 + $1.fileCount }
+        return HStack(spacing: 6) {
+            Label(group.name, systemImage: "folder.fill")
+            Spacer()
+            Text("\(count)").font(.caption).foregroundStyle(.secondary)
+        }
+        .contextMenu {
+            Button("Rename…") {
+                groupNameDraft = group.name
+                groupSheet = .rename(group)
+            }
+            Button("Delete Group", role: .destructive) {
+                Task { try? await groupStore.delete(id: id) }
+            }
+        }
+    }
+
+    // MARK: Helpers
+
+    private var scopeBinding: Binding<LibraryScope?> {
+        Binding(get: { model.filter.scope }, set: { if let s = $0 { model.filter.scope = s } })
+    }
+
+    private func roots(in groupId: Int64) -> [Root] {
+        model.roots.filter { $0.groupId == groupId }
+    }
+
+    private var ungroupedRoots: [Root] {
+        model.roots.filter { $0.groupId == nil }
+    }
+
+    private func expansion(for groupId: Int64) -> Binding<Bool> {
+        Binding(get: { !collapsedGroups.contains(groupId) },
+                set: { open in
+                    if open { collapsedGroups.remove(groupId) } else { collapsedGroups.insert(groupId) }
+                })
+    }
+
+    private func commitGroupSheet(_ sheet: GroupSheet) {
+        let name = groupNameDraft
+        groupSheet = nil
+        switch sheet {
+        case .create(let assignRoot):
+            Task {
+                guard let gid = try? await groupStore.create(name: name) else { return }
+                if let rootId = assignRoot { try? await groupStore.assign(rootId: rootId, to: gid) }
+            }
+        case .rename(let group):
+            guard let id = group.id else { return }
+            Task { try? await groupStore.rename(id: id, to: name) }
         }
     }
 }

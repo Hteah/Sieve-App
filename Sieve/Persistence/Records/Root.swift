@@ -14,6 +14,7 @@ struct Root: Codable, Identifiable, Hashable, Sendable, FetchableRecord, Mutable
     var lastScanCompleted: Date?
     var fileCount: Int
     var createdAt: Date
+    var groupId: Int64?
 
     init(name: String, bookmarkData: Data, lastResolvedPath: String, volumeUUID: String?) {
         self.name = name
