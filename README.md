@@ -29,21 +29,25 @@ A lightweight native macOS app for organizing music-production sample collection
 
 ## Build & run
 
+No signing setup, no accounts — a fresh clone builds and runs with just these:
+
 ```bash
-xcodegen generate                                        # creates Sieve.xcodeproj (git-ignored)
+xcodegen generate                                        # creates Sieve.xcodeproj (git-ignored); rerun after adding/removing files
 open Sieve.xcodeproj                                     # run from Xcode, or:
 xcodebuild -project Sieve.xcodeproj -scheme Sieve -destination 'platform=macOS' -derivedDataPath build build
 open build/Build/Products/Debug/Sieve.app
 ```
 
-Then **File → Add Folder…** (⌘O) and pick a sample folder. **⌘R** rescans everything.
+Builds are ad-hoc signed ("Sign to Run Locally") — nothing to configure. Then **File → Add
+Folder…** (⌘O) and pick a sample folder; **⌘R** rescans everything. Pull and re-run `xcodegen
+generate` when someone changes `project.yml` or adds files.
 
-### Signing (optional but recommended for daily use)
+### Signing (optional — for frequent rebuilds only)
 
-Builds are **ad-hoc signed** by default (`Signing.xcconfig`). macOS ties a security-scoped
-bookmark to the exact code signature, so every ad-hoc rebuild invalidates the folders you've
-granted access to — you re-add them after each build. To avoid that, sign with a real identity:
-create `Signing.local.xcconfig` (git-ignored) beside `Signing.xcconfig`:
+macOS ties a security-scoped bookmark to the exact code signature, so every ad-hoc rebuild
+invalidates the folders you've granted Sieve access to — you re-add them after each build. If
+that gets old, sign with a real identity: create `Signing.local.xcconfig` (git-ignored) beside
+`Signing.xcconfig`:
 
 ```
 CODE_SIGN_STYLE    = Manual
