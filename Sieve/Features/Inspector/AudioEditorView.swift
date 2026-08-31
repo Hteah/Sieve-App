@@ -47,6 +47,7 @@ struct AudioEditorView: View {
             }
         }
         .padding(10)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .onChange(of: session.recorder.lastRecordingURL) { _, new in
             guard new != nil else { return }
             showRecordingSaved = true
