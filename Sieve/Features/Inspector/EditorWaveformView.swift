@@ -9,10 +9,14 @@ struct EditorWaveformView: View {
     let mip: PeakMip?
     @Binding var selection: Range<Int>?
     var playheadFrame: Int?
+    /// Pending amplify-slider gain (dB); the selected region is drawn scaled by it.
+    @Binding var previewGainDb: Float
     /// Called with the clicked frame when the user clicks (not drags) the waveform.
     var onClickSeek: ((Int) -> Void)? = nil
     /// Called when a drag-selection finishes (the selection binding is already updated).
     var onSelectionCommitted: (() -> Void)? = nil
+    /// Commits the pending `previewGainDb` to the audio.
+    var onApplyGain: (() -> Void)? = nil
     /// Changes when a different file is loaded; resets the zoom/scroll window.
     var resetToken: AnyHashable?
 
@@ -63,6 +67,7 @@ struct EditorWaveformView: View {
                 )
             }
             .overlay(alignment: .topTrailing) { zoomControls(width: width, n: n, span: span, start: start) }
+            .overlay(alignment: .topLeading) { amplifyPanel(width: width, span: span, start: start) }
             .onChange(of: resetToken) { _, _ in visibleStart = 0; visibleFrames = 0 }
             .onChange(of: clip.frameCount) { _, newValue in
                 if visibleFrames > newValue { visibleFrames = 0 }
@@ -163,6 +168,31 @@ struct EditorWaveformView: View {
         visibleStart = newStart
     }
 
+    @ViewBuilder
+    private func amplifyPanel(width: CGFloat, span: Int, start: Int) -> some View {
+        if let s = selection, !s.isEmpty {
+            let rawX = x(forFrame: s.lowerBound, width: width, span: span, start: start)
+            HStack(spacing: 6) {
+                Image(systemName: "dial.low").font(.caption2).foregroundStyle(.secondary)
+                Slider(value: $previewGainDb, in: -36...24).controlSize(.mini).frame(width: 120)
+                Text(String(format: "%+.1f dB", previewGainDb))
+                    .font(.caption2).monospacedDigit().frame(width: 54, alignment: .trailing)
+                Button { onApplyGain?() } label: { Image(systemName: "checkmark") }
+                    .disabled(previewGainDb == 0)
+                    .help("Apply gain to the selection")
+                Button { previewGainDb = 0 } label: { Image(systemName: "arrow.counterclockwise") }
+                    .disabled(previewGainDb == 0)
+                    .help("Reset")
+            }
+            .buttonStyle(.borderless)
+            .padding(.horizontal, 8).padding(.vertical, 4)
+            .background(.regularMaterial, in: Capsule())
+            .overlay(Capsule().strokeBorder(.separator))
+            .fixedSize()
+            .offset(x: min(max(0, rawX), max(0, width - 260)) + 4, y: 4)
+        }
+    }
+
     private func pan(pixels dx: CGFloat, width: CGFloat, n: Int, span: Int, start: Int) {
         guard span < n else { return }
         let framesPerPixel = Double(span) / Double(max(1, width))
@@ -189,6 +219,10 @@ struct EditorWaveformView: View {
         let spp = Double(span) / Double(max(1, columns))
         let level = mip?.level(forSamplesPerPixel: spp)
         let end = min(n, start + span)
+
+        // Live amplify-slider preview: scale only the columns overlapping the selection.
+        let previewGain: Float = previewGainDb == 0 ? 1 : pow(10, previewGainDb / 20)
+        let previewRange: Range<Int>? = (previewGain != 1) ? selection : nil
 
         func xForFrame(_ f: Int) -> CGFloat {
             (CGFloat(f - start) / CGFloat(max(1, span))) * size.width
@@ -231,6 +265,10 @@ struct EditorWaveformView: View {
                         if v > hi { hi = v }
                         i += step
                     }
+                }
+                if let pr = previewRange, f1 > pr.lowerBound, f0 < pr.upperBound {
+                    lo = max(-1, min(1, lo * previewGain))
+                    hi = max(-1, min(1, hi * previewGain))
                 }
                 let x = CGFloat(px) + 0.5
                 wave.move(to: CGPoint(x: x, y: mid - CGFloat(hi) * half))

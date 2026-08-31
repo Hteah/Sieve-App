@@ -131,8 +131,10 @@ struct AudioEditorView: View {
             mip: session.mip,
             selection: Binding(get: { session.selection }, set: { session.selection = $0 }),
             playheadFrame: mirroredPlayhead,
+            previewGainDb: Binding(get: { session.previewGainDb }, set: { session.setPreviewGain($0) }),
             onClickSeek: { session.setCursor($0) },
             onSelectionCommitted: { session.startPlayback() },   // jump playback to the new selection
+            onApplyGain: { session.applyPreviewGain() },
             resetToken: session.source?.sampleId
         )
         // Match the Info tab's 120 pt waveform inline; let the pop-out window use the room.

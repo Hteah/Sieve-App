@@ -27,7 +27,11 @@ final class EditorSession {
     private(set) var clip: AudioClip?
     private(set) var mip: PeakMip?
     private(set) var thumbnail: WaveformSummary?
-    var selection: Range<Int>?
+    var selection: Range<Int>? {
+        didSet { if oldValue != selection { previewGainDb = 0 } }
+    }
+    /// Pending gain (dB) for the inline amplify slider — a live visual preview until applied.
+    private(set) var previewGainDb: Float = 0
     var looping = false {
         didSet { if oldValue != looping, player.isPlaying { startPlayback() } }
     }
@@ -229,6 +233,14 @@ final class EditorSession {
     func normalize(toDb db: Float) {
         guard let c = clip else { return }
         mutate(c.normalizedToPeak(db: db, in: effectiveRange)) { $0 }
+    }
+
+    /// Inline amplify slider: `db` is a live visual preview until `applyPreviewGain()`.
+    func setPreviewGain(_ db: Float) { previewGainDb = db }
+
+    func applyPreviewGain() {
+        guard previewGainDb != 0 else { return }
+        amplify(db: previewGainDb)   // clears previewGainDb via mutate()
     }
 
     func amplify(db: Float) {
@@ -476,6 +488,7 @@ final class EditorSession {
         redo.removeAll()
         editSerial += 1
         clip = next
+        previewGainDb = 0
         selection = newSelection(edited).flatMap { Self.clamp($0, count: next.frameCount) }
         cursor = min(cursor, next.frameCount)
         rebuildDerived(for: next)
