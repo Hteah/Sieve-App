@@ -135,7 +135,8 @@ struct AudioEditorView: View {
             onClickSeek: { session.setCursor($0) },
             onSelectionCommitted: { session.startPlayback() },   // jump playback to the new selection
             onApplyGain: { session.applyPreviewGain() },
-            resetToken: session.source?.sampleId
+            resetToken: session.source?.sampleId,
+            showsTimeRuler: isPopOut
         )
         // Match the Info tab's 120 pt waveform inline; let the pop-out window use the room.
         .frame(height: isPopOut ? nil : 120)
