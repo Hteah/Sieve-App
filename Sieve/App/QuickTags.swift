@@ -15,9 +15,9 @@ enum QuickTags {
     static let defaults: [QuickTag] = [
         QuickTag(name: "Tag 1", symbol: "bolt.fill"),
         QuickTag(name: "Tag 2", symbol: "waveform"),
-        QuickTag(name: "Tag 3", symbol: "hexagon.fill"),
-        QuickTag(name: "Tag 4", symbol: "triangle.fill"),
-        QuickTag(name: "Tag 5", symbol: "diamond.fill"),
+        QuickTag(name: "Tag 3", symbol: "hexagon"),
+        QuickTag(name: "Tag 4", symbol: "triangle"),
+        QuickTag(name: "Tag 5", symbol: "diamond"),
         QuickTag(name: "Tag 6", symbol: "sparkles"),
     ]
 
@@ -48,10 +48,10 @@ enum QuickTags {
         "circle.hexagongrid.fill", "circle.grid.cross.fill", "circle.grid.3x3.fill",
         // Flair / abstract
         "sparkles", "sparkle", "burst.fill", "fireworks", "atom", "function", "scope", "rays",
-        // Geometric (Ableton-box feel)
-        "hexagon.fill", "triangle.fill", "diamond.fill", "square.fill", "pentagon.fill",
-        "octagon.fill", "seal.fill", "star.fill", "rhombus.fill", "circle.fill",
-        "capsule.fill", "app.fill",
+        // Geometric (Ableton-box feel) — outline, not filled
+        "hexagon", "triangle", "diamond", "square", "pentagon",
+        "octagon", "seal", "star", "rhombus", "circle",
+        "capsule", "app",
     ]
 
     /// Decode the stored JSON, always returning exactly `count` slots (padded from `defaults`).
