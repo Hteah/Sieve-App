@@ -11,6 +11,10 @@ struct SampleListView: View {
     @State private var tableWidth: CGFloat = 900
     @State private var columnCustomization = TableColumnCustomization<SampleRow>()
     @State private var convertRequest: ConvertRequest?
+    // A tap on a row's waveform runs a DragGesture inside the Table cell, which knocks
+    // keyboard focus off the Table — so the next Space press lands nowhere (or in the
+    // search field). Re-assert focus here after any row/waveform interaction.
+    @FocusState private var listFocused: Bool
 
     private struct ConvertRequest: Identifiable {
         let id = UUID()
@@ -40,6 +44,7 @@ struct SampleListView: View {
                     WaveformCell(row: row) { fraction in
                         model.selection = [row.id]
                         env.seek(row, toFraction: fraction)
+                        listFocused = true
                     }
                 }
                 .width(min: 80, ideal: 240)
@@ -155,22 +160,29 @@ struct SampleListView: View {
                 }
             } primaryAction: { ids in
                 if let id = ids.first, let row = model.rows.first(where: { $0.id == id }) { env.preview(row) }
+                listFocused = true
             }
+            .focused($listFocused)
             .onKeyPress(.space) {
-                // Stop wins: Space halts any running preview regardless of which row is
-                // selected. Only when nothing is playing does it start the selected row —
-                // a plain play/stop toggle, like the wave editor.
+                // Play / pause / resume, like the wave editor: Space pauses a running
+                // preview in place, and Space again resumes it from the same spot. With
+                // nothing playing — or a different row now selected — it starts the
+                // selected row from the top.
+                let row = model.primarySelection
                 if env.player.isPlaying {
-                    env.player.stop()
-                } else if let row = model.primarySelection {
-                    env.togglePreview(row)
+                    env.player.pause()
+                } else if env.player.isPaused, let row, row.id == env.player.currentSampleId {
+                    env.player.resume()
+                } else if let row {
+                    env.preview(row)
                 } else {
                     return .ignored
                 }
                 return .handled
             }
             .onKeyPress(.escape) {
-                guard env.player.isPlaying else { return .ignored }
+                // Esc fully stops (and forgets the playhead), so the next Space starts over.
+                guard env.player.isPlaying || env.player.isPaused else { return .ignored }
                 env.player.stop()
                 return .handled
             }

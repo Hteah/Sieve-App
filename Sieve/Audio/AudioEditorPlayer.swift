@@ -15,6 +15,16 @@ final class AudioEditorPlayer {
     private var timer: Timer?
     private var rangeStart = 0        // first clip frame of what was scheduled
     private var scheduledFrames = 0
+    private var isLooping = false
+    private var clipSampleRate: Double = 44_100
+    /// Playhead runs off a wall clock, not `node.playerTime`: the node's sample time keeps
+    /// accumulating across stop()/reschedule cycles instead of resetting, which threw the
+    /// playhead off on the first resume and desynced play/pause.
+    private var playStartDate: Date?
+    /// Bumped on every schedule and every stop; a buffer-completion callback is honoured only
+    /// while its token is current, so a stop()'d buffer can't land a stale "finished" on the
+    /// next play (which would jump the playhead to the end and desync play/pause).
+    private var playToken = 0
     private static let log = Logger(subsystem: "com.arlo.Sieve", category: "editorplayer")
 
     private(set) var isPlaying = false
@@ -31,16 +41,22 @@ final class AudioEditorPlayer {
               let buffer = Self.makeBuffer(clip, range: r) else { return }
         rangeStart = r.lowerBound
         scheduledFrames = r.count
+        isLooping = looping
+        clipSampleRate = clip.sampleRate
+        playToken &+= 1
+        let token = playToken
         do {
             try prepareEngine(format: buffer.format)
             let options: AVAudioPlayerNodeBufferOptions = looping ? [.loops, .interrupts] : [.interrupts]
-            node.scheduleBuffer(buffer, at: nil, options: options) { [weak self] in
-                Task { @MainActor in self?.bufferFinished(looping: looping) }
+            node.scheduleBuffer(buffer, at: nil, options: options,
+                                completionCallbackType: .dataPlayedBack) { [weak self] _ in
+                Task { @MainActor in self?.bufferFinished(token: token, looping: looping) }
             }
             if !engine.isRunning { try startEngineRecovering(format: buffer.format) }
             node.play()
             isPlaying = true
             playheadFrame = r.lowerBound
+            playStartDate = Date()
             startTimer()
         } catch {
             Self.log.error("editor play failed: \(error, privacy: .public)")
@@ -48,15 +64,18 @@ final class AudioEditorPlayer {
     }
 
     func stop() {
+        playToken &+= 1
         node.stop()
         timer?.invalidate(); timer = nil
         isPlaying = false
+        playStartDate = nil
     }
 
-    private func bufferFinished(looping: Bool) {
-        guard !looping else { return }
+    private func bufferFinished(token: Int, looping: Bool) {
+        guard token == playToken, !looping else { return }
         isPlaying = false
         playheadFrame = rangeStart + scheduledFrames
+        playStartDate = nil
         timer?.invalidate(); timer = nil
     }
 
@@ -113,10 +132,13 @@ final class AudioEditorPlayer {
     }
 
     private func tick() {
-        guard isPlaying, let nodeTime = node.lastRenderTime,
-              let playerTime = node.playerTime(forNodeTime: nodeTime) else { return }
-        let played = max(0, Int(playerTime.sampleTime)) % max(1, scheduledFrames)
+        guard isPlaying, let start = playStartDate else { return }
+        let elapsed = max(0, Int(Date().timeIntervalSince(start) * clipSampleRate))
+        // Wrap while looping; otherwise clamp so a tick at the boundary can't snap the
+        // playhead back to the range start before `bufferFinished` lands.
+        let played = isLooping ? elapsed % max(1, scheduledFrames) : min(elapsed, scheduledFrames)
         playheadFrame = rangeStart + played
+        if !isLooping, elapsed >= scheduledFrames { bufferFinished(token: playToken, looping: false) }
     }
 
     private static func makeBuffer(_ clip: AudioClip, range r: Range<Int>) -> AVAudioPCMBuffer? {

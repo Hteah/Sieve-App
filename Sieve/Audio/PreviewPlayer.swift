@@ -11,9 +11,17 @@ final class PreviewPlayer {
     private let node = AVAudioPlayerNode()
     private var currentFormat: AVAudioFormat?
     private var file: AVAudioFile?
-    private var startFrame: AVAudioFramePosition = 0
     private var timer: Timer?
     private var scopedURL: URL?
+    /// Playhead is tracked off a wall clock, not `node.playerTime`: that node's sample time
+    /// keeps accumulating across stop()/reschedule cycles rather than resetting, which threw
+    /// `position` past the end on the first resume and desynced play/pause.
+    private var playStartDate: Date?
+    private var playStartPosition: TimeInterval = 0
+    /// Bumped on every schedule and every stop; a segment-completion callback is honoured only
+    /// while its token is still current. `node.stop()` fires the completion of the segment it
+    /// cancels, so without this a pause would land a stale "playback ended" on the next resume.
+    private var playToken = 0
     private static let log = Logger(subsystem: "com.arlo.Sieve", category: "player")
 
     private(set) var currentURL: URL?
@@ -29,7 +37,7 @@ final class PreviewPlayer {
 
     func toggle(url: URL, sampleId: Int64, rootURL: URL?) {
         if currentSampleId == sampleId, isPlaying {
-            stop()
+            pause()
         } else {
             play(url: url, sampleId: sampleId, rootURL: rootURL, from: 0)
         }
@@ -60,29 +68,53 @@ final class PreviewPlayer {
         let sr = f.processingFormat.sampleRate
         let frame = AVAudioFramePosition(max(0, min(seconds, duration)) * sr)
         let remaining = AVAudioFrameCount(max(0, f.length - frame))
+        playToken &+= 1
         node.stop()
         guard remaining > 0 else { isPlaying = false; position = duration; return }
-        startFrame = frame
-        node.scheduleSegment(f, startingFrame: frame, frameCount: remaining, at: nil) { [weak self] in
-            Task { @MainActor in self?.playbackEnded() }
+        playToken &+= 1
+        let token = playToken
+        node.scheduleSegment(f, startingFrame: frame, frameCount: remaining, at: nil,
+                             completionCallbackType: .dataPlayedBack) { [weak self] _ in
+            Task { @MainActor in self?.playbackEnded(token: token) }
         }
         do {
             if !engine.isRunning { try engine.start() }
             node.play()
             isPlaying = true
             position = seconds
+            playStartPosition = seconds
+            playStartDate = Date()
             startTimer()
         } catch {
             Self.log.error("engine start failed: \(error, privacy: .public)")
         }
     }
 
-    func stop() { stop(keepFile: true) }
+    /// Halts playback but keeps the file open and the playhead where it is, so `resume()`
+    /// can continue from the same spot. This is what Space does in the list.
+    func pause() { stop(keepFile: true) }
+
+    /// Fully stops: drops the file, zeroes the playhead, releases the security scope.
+    func stop() { stop(keepFile: false) }
+
+    /// True when playback was paused partway through and `resume()` would continue it.
+    var isPaused: Bool {
+        file != nil && !isPlaying && position > 0 && position < duration
+    }
+
+    /// Continues a paused preview from where `pause()` left the playhead. If the previous
+    /// play had reached the end, starts over from the top.
+    func resume() {
+        guard file != nil, !isPlaying else { return }
+        seek(to: position < duration ? position : 0)
+    }
 
     private func stop(keepFile: Bool) {
+        playToken &+= 1
         node.stop()
         timer?.invalidate(); timer = nil
         isPlaying = false
+        playStartDate = nil
         if !keepFile {
             file = nil
             currentURL = nil
@@ -93,14 +125,16 @@ final class PreviewPlayer {
         }
     }
 
-    private func playbackEnded() {
-        // The completion fires slightly before the tail renders; only mark stopped if we're at the end.
-        guard isPlaying else { return }
-        if position >= duration - 0.05 || !node.isPlaying {
-            isPlaying = false
-            position = duration
-            timer?.invalidate(); timer = nil
-        }
+    private func playbackEnded(token: Int) {
+        guard token == playToken, isPlaying else { return }
+        finishAtEnd()
+    }
+
+    private func finishAtEnd() {
+        isPlaying = false
+        position = duration
+        playStartDate = nil
+        timer?.invalidate(); timer = nil
     }
 
     private func prepareEngine(format: AVAudioFormat) throws {
@@ -121,12 +155,9 @@ final class PreviewPlayer {
     }
 
     private func tick() {
-        guard isPlaying, let f = file,
-              let nodeTime = node.lastRenderTime,
-              let playerTime = node.playerTime(forNodeTime: nodeTime) else { return }
-        let sr = f.processingFormat.sampleRate
-        position = Double(startFrame + playerTime.sampleTime) / sr
-        if position >= duration { playbackEnded() }
+        guard isPlaying, let start = playStartDate else { return }
+        position = min(duration, max(0, playStartPosition + Date().timeIntervalSince(start)))
+        if position >= duration { finishAtEnd() }
     }
 
     private func releaseScope() {
