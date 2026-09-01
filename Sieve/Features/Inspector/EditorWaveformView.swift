@@ -23,6 +23,8 @@ struct EditorWaveformView: View {
     var showsTimeRuler = false
     /// While zoomed in and playing, keep the playhead on screen by paging the visible window.
     var followPlayhead = false
+    /// Bind ⌘+ / ⌘- / ⌘0 to zoom in / out / fit (pop-out editor only).
+    var keyboardZoomEnabled = false
 
     @AppStorage("appTheme") private var themeRaw = AppTheme.system.rawValue
     private var accent: Color { AppTheme.current(themeRaw).waveformColor }
@@ -66,12 +68,23 @@ struct EditorWaveformView: View {
                         if abs(dx) > abs(dy) {
                             pan(pixels: dx, width: width, n: n, span: span, start: start)
                         } else {
-                            zoom(factor: exp(-dy * 0.01), atX: x, width: width, n: n, span: span, start: start)
+                            // Zoom toward the selection when there is one, otherwise toward the pointer.
+                            zoom(factor: exp(-dy * 0.01), atX: x, width: width, n: n, span: span, start: start,
+                                 anchorOnSelection: true)
                         }
                     },
                     onDrag: { x, phase in handleDrag(x: x, phase: phase, width: width, span: span, start: start) },
                     onDoubleClick: { _ in if n > 0 { selection = 0..<n } },
-                    edgeNearX: { x in nearSelectionEdge(x, width: width, span: span, start: start) }
+                    edgeNearX: { x in nearSelectionEdge(x, width: width, span: span, start: start) },
+                    zoomKeysEnabled: keyboardZoomEnabled,
+                    onZoomKey: { key in
+                        switch key {
+                        case .in:  zoom(factor: 2, atX: width / 2, width: width, n: n, span: span, start: start,
+                                        anchorOnSelection: true)
+                        case .out: zoom(factor: 0.5, atX: width / 2, width: width, n: n, span: span, start: start)
+                        case .fit: visibleStart = 0; visibleFrames = 0
+                        }
+                    }
                 )
             }
             .overlay(alignment: .topTrailing) { zoomControls(width: width, n: n, span: span, start: start) }
@@ -93,7 +106,8 @@ struct EditorWaveformView: View {
                 Image(systemName: "minus")
             }
             Button("Fit") { visibleStart = 0; visibleFrames = 0 }
-            Button { zoom(factor: 2, atX: width / 2, width: width, n: n, span: span, start: start) } label: {
+            Button { zoom(factor: 2, atX: width / 2, width: width, n: n, span: span, start: start,
+                          anchorOnSelection: true) } label: {
                 Image(systemName: "plus")
             }
         }
@@ -164,13 +178,27 @@ struct EditorWaveformView: View {
         }
     }
 
-    private func zoom(factor: Double, atX x: CGFloat, width: CGFloat, n: Int, span: Int, start: Int) {
+    private func zoom(factor: Double, atX x: CGFloat, width: CGFloat, n: Int, span: Int, start: Int,
+                      anchorOnSelection: Bool = false) {
         guard n > 0 else { return }
         let clamped = max(0.2, min(5, factor))
+        var newSpan = Int((Double(span) / clamped).rounded())
+
+        // Zooming in with a selection: frame the selection (first step) and then tighten
+        // around its centre, keeping it in the middle of the view.
+        if anchorOnSelection, clamped > 1, let sel = selection, !sel.isEmpty {
+            newSpan = min(newSpan, max(sel.count * 6 / 5, minSpan))
+            newSpan = max(minSpan, min(n, newSpan))
+            let mid = (sel.lowerBound + sel.upperBound) / 2
+            let newStart = max(0, min(n - newSpan, mid - newSpan / 2))
+            visibleFrames = newSpan == n ? 0 : newSpan
+            visibleStart = newStart
+            return
+        }
+
+        newSpan = max(minSpan, min(n, newSpan))
         let cursorFrac = Double(max(0, min(width, x)) / max(1, width))
         let cursorFrame = Double(start) + cursorFrac * Double(span)
-        var newSpan = Int((Double(span) / clamped).rounded())
-        newSpan = max(minSpan, min(n, newSpan))
         var newStart = Int((cursorFrame - cursorFrac * Double(newSpan)).rounded())
         newStart = max(0, min(n - newSpan, newStart))
         visibleFrames = newSpan == n ? 0 : newSpan
@@ -412,11 +440,14 @@ struct EditorWaveformView: View {
 /// waveform canvas so it can zoom toward the pointer, which SwiftUI has no first-class API for.
 private struct InputCatcher: NSViewRepresentable {
     enum Phase { case began, changed, ended }
+    enum ZoomKey { case `in`, out, fit }
 
     var onScroll: (_ deltaX: CGFloat, _ deltaY: CGFloat, _ x: CGFloat) -> Void
     var onDrag: (_ x: CGFloat, _ phase: Phase) -> Void
     var onDoubleClick: (_ x: CGFloat) -> Void
     var edgeNearX: (_ x: CGFloat) -> Bool
+    var zoomKeysEnabled = false
+    var onZoomKey: ((ZoomKey) -> Void)? = nil
 
     func makeNSView(context: Context) -> NSView {
         let view = CatchingView()
@@ -433,6 +464,8 @@ private struct InputCatcher: NSViewRepresentable {
         view.onDrag = onDrag
         view.onDoubleClick = onDoubleClick
         view.edgeNearX = edgeNearX
+        view.zoomKeysEnabled = zoomKeysEnabled
+        view.onZoomKey = onZoomKey
     }
 
     final class CatchingView: NSView {
@@ -440,8 +473,26 @@ private struct InputCatcher: NSViewRepresentable {
         var onDrag: ((CGFloat, Phase) -> Void)?
         var onDoubleClick: ((CGFloat) -> Void)?
         var edgeNearX: ((CGFloat) -> Bool)?
+        var zoomKeysEnabled = false
+        var onZoomKey: ((ZoomKey) -> Void)?
         private var tracking: NSTrackingArea?
         private var dragging = false
+
+        /// ⌘+ / ⌘= zoom in, ⌘- zoom out, ⌘0 fit. Handled here (not as SwiftUI
+        /// `.keyboardShortcut` buttons) so it survives the ~30 fps re-render during playback.
+        override func performKeyEquivalent(with event: NSEvent) -> Bool {
+            guard zoomKeysEnabled, let onZoomKey,
+                  let chars = event.charactersIgnoringModifiers else { return false }
+            // ⌘ required; Shift allowed (⌘+ is ⌘⇧= on a US layout); Option/Control not.
+            let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            guard flags.contains(.command), !flags.contains(.option), !flags.contains(.control) else { return false }
+            switch chars {
+            case "+", "=": onZoomKey(.in);  return true
+            case "-", "_": onZoomKey(.out); return true
+            case "0":      onZoomKey(.fit); return true
+            default:       return false
+            }
+        }
 
         override func updateTrackingAreas() {
             super.updateTrackingAreas()
