@@ -134,6 +134,7 @@ final class EditorSession {
         editSerial += 1; savedSerial = editSerial
         selection = nil
         cursor = 0
+        cursorInitialized = false
         loadError = nil
         clip = nil; mip = nil; thumbnail = nil   // show the loading state, not the previous file
 
@@ -319,6 +320,9 @@ final class EditorSession {
     /// Insertion point where playback starts when nothing is selected. Set by clicking the
     /// waveform; shown as a line when not playing.
     var cursor = 0
+    /// False until the cursor reflects a real intent (a waveform click, a pause, or the
+    /// first Play seeding from the list preview). Reset when a new file loads.
+    private var cursorInitialized = false
 
     /// What Play / Loop act on: the selection if there is one, otherwise from the cursor to the end.
     private var playbackRange: Range<Int> {
@@ -333,21 +337,47 @@ final class EditorSession {
     }
 
     func startPlayback() {
-        guard let clip, playbackRange.count > 0 else { return }
+        guard let clip, clip.frameCount > 0 else { return }
+        // First Play in a fresh session: pick up from the list preview if it's on this file,
+        // so opening the editor mid-listen continues rather than restarting.
+        if !cursorInitialized {
+            cursor = listPreviewFrame() ?? cursor
+            cursorInitialized = true
+        }
+        guard playbackRange.count > 0 else { return }
         env.player.stop()
         player.play(clip, range: playbackRange, looping: looping)
     }
 
-    /// Stops playback, leaving the cursor where the playhead was so Play resumes from there.
+    /// Stops playback, parking the cursor where the playhead was so Play resumes from there.
+    /// Reads the playhead unconditionally — a natural-end race can flip `player.isPlaying`
+    /// off just before this runs, and we still want the resume point. Skipped when a
+    /// selection is active (that always replays whole) or the playhead is at either edge.
     func stopPlayback() {
-        if player.isPlaying { cursor = max(0, min(frameCount, player.playheadFrame)) }
+        let noSelection = selection.map(\.isEmpty) ?? true
+        let head = player.playheadFrame
+        if noSelection, head > 0, head < frameCount {
+            cursor = max(0, min(frameCount, head))
+            cursorInitialized = true
+        }
         player.stop()
     }
 
     /// Moves the insertion point (from a waveform click); jumps live playback there too.
     func setCursor(_ frame: Int) {
         cursor = max(0, min(frameCount, frame))
+        cursorInitialized = true
         if player.isPlaying { startPlayback() }
+    }
+
+    /// The list-preview player's playhead as a frame in this clip, when that player is loaded
+    /// on the same file (playing or paused) — nil otherwise.
+    private func listPreviewFrame() -> Int? {
+        guard let src = source, env.player.currentSampleId == src.sampleId,
+              sampleRate > 0,
+              env.player.position > 0,
+              env.player.position < env.player.duration - 0.05 else { return nil }
+        return max(0, min(frameCount, Int(env.player.position * sampleRate)))
     }
 
     // MARK: Save

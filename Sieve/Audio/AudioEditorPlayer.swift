@@ -138,7 +138,12 @@ final class AudioEditorPlayer {
         // playhead back to the range start before `bufferFinished` lands.
         let played = isLooping ? elapsed % max(1, scheduledFrames) : min(elapsed, scheduledFrames)
         playheadFrame = rangeStart + played
-        if !isLooping, elapsed >= scheduledFrames { bufferFinished(token: playToken, looping: false) }
+        // End on the .dataPlayedBack callback, which tracks real audio. Only fall back to the
+        // wall clock well past the end (a quarter second), so this can't pre-empt playback
+        // that is still sounding and desync play/pause.
+        if !isLooping, elapsed >= scheduledFrames + Int(clipSampleRate / 4) {
+            bufferFinished(token: playToken, looping: false)
+        }
     }
 
     private static func makeBuffer(_ clip: AudioClip, range r: Range<Int>) -> AVAudioPCMBuffer? {
