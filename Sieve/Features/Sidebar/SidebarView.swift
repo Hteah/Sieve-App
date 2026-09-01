@@ -90,7 +90,7 @@ struct SidebarView: View {
                 let slots = QuickTags.load(quickTagSlotsJSON)
                 ForEach(0..<QuickTags.count, id: \.self) { i in
                     HStack {
-                        Label(QuickTags.displayName(slots, i), systemImage: QuickTags.symbolName(slots, i))
+                        QuickTagLabel(slots: slots, index: i)
                         Spacer()
                         Text("\(model.quickTagCounts[i])").foregroundStyle(.secondary).font(.caption)
                     }

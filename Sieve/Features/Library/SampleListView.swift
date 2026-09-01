@@ -87,7 +87,7 @@ struct SampleListView: View {
                             Toggle(isOn: Binding(
                                 get: { QuickTags.isSet(row.quickTags ?? 0, i) },
                                 set: { _ in Task { try? await AnnotationStore(database: env.database).toggleQuickTag(i, for: [row]) } })) {
-                                Label(QuickTags.displayName(slots, i), systemImage: QuickTags.symbolName(slots, i))
+                                QuickTagMenuLabel(slots: slots, index: i)
                             }
                         }
                         Divider()
@@ -144,7 +144,11 @@ struct SampleListView: View {
                             Button {
                                 Task { try? await AnnotationStore(database: env.database).toggleQuickTag(i, for: rows) }
                             } label: {
-                                Label(QuickTags.displayName(slots, i), systemImage: allOn ? "checkmark" : QuickTags.symbolName(slots, i))
+                                if allOn {
+                                    Label(QuickTags.displayName(slots, i), systemImage: "checkmark")
+                                } else {
+                                    QuickTagMenuLabel(slots: slots, index: i)
+                                }
                             }
                         }
                         Divider()

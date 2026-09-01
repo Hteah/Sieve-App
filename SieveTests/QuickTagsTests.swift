@@ -1,7 +1,21 @@
+import CoreGraphics
 import Testing
 @testable import Sieve
 
 struct QuickTagsTests {
+    @Test func oscillatorWaveformsAreOfferedAndDraw() {
+        let rect = CGRect(x: 0, y: 0, width: 100, height: 60)
+        for wave in OscWaveform.allCases {
+            #expect(QuickTags.symbolChoices.contains(wave.rawValue))
+            #expect(wave.rawValue.hasPrefix("osc."))
+            #expect(!wave.displayName.isEmpty)
+            #expect(!OscWaveShape(waveform: wave).path(in: rect).isEmpty)
+        }
+        // The picker filter must not drop these the way it drops unknown SF Symbols.
+        #expect(OscWaveform(rawValue: "osc.saw") != nil)
+        #expect(OscWaveform(rawValue: "waveform") == nil)
+    }
+
     @Test func maskAndToggling() {
         for i in 0..<QuickTags.count {
             #expect(QuickTags.mask(i) == 1 << i)

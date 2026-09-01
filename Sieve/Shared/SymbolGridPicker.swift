@@ -11,9 +11,13 @@ struct SymbolGridPicker: View {
 
     private let columns = Array(repeating: GridItem(.fixed(34), spacing: 6), count: 8)
 
-    /// Only the glyphs the running OS actually ships (invalid names would render blank).
+    /// Drawn oscillator waveforms, plus the SF Symbols the running OS actually ships
+    /// (invalid names would render blank).
     private var choices: [String] {
-        QuickTags.symbolChoices.filter { NSImage(systemSymbolName: $0, accessibilityDescription: nil) != nil }
+        QuickTags.symbolChoices.filter {
+            OscWaveform(rawValue: $0) != nil
+                || NSImage(systemSymbolName: $0, accessibilityDescription: nil) != nil
+        }
     }
 
     var body: some View {
@@ -26,7 +30,7 @@ struct SymbolGridPicker: View {
                             onPick(name)
                             dismiss()
                         } label: {
-                            Image(systemName: name)
+                            QuickTagGlyph(symbol: name)
                                 .imageScale(.medium)
                                 .frame(width: 34, height: 34)
                                 .background(name == selected ? Color.accentColor.opacity(0.25) : Color.secondary.opacity(0.08),
@@ -35,7 +39,7 @@ struct SymbolGridPicker: View {
                                     .strokeBorder(name == selected ? Color.accentColor : .clear, lineWidth: 1.5))
                         }
                         .buttonStyle(.plain)
-                        .help(name)
+                        .help(OscWaveform(rawValue: name)?.displayName ?? name)
                     }
                 }
                 .padding(.vertical, 2)

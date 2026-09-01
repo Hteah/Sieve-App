@@ -24,6 +24,8 @@ enum QuickTags {
     /// Curated glyphs — music / audio / electronic, then geometric — offered in the icon picker.
     /// The picker filters this to names the running OS actually ships, so it's safe to be generous.
     static let symbolChoices: [String] = [
+        // Oscillator waveforms — drawn, not SF Symbols (see QuickTagGlyph)
+        "osc.sine", "osc.square", "osc.saw", "osc.triangle", "osc.noise", "osc.random",
         // Waveforms & signal
         "waveform", "waveform.circle.fill", "waveform.path", "waveform.path.ecg",
         "waveform.badge.plus", "waveform.badge.mic", "waveform.slash",

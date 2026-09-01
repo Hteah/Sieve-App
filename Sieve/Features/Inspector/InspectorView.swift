@@ -213,7 +213,7 @@ struct SampleInspector: View {
                         let targets = selectionCount > 1 ? selectedRows : [row]
                         Task { try? await store.toggleQuickTag(i, for: targets) }
                     } label: {
-                        Label(QuickTags.displayName(slots, i), systemImage: QuickTags.symbolName(slots, i))
+                        QuickTagLabel(slots: slots, index: i)
                             .font(.caption)
                             .padding(.horizontal, 8).padding(.vertical, 3)
                             .background(on ? Color.accentColor.opacity(0.22) : Color.secondary.opacity(0.1), in: Capsule())

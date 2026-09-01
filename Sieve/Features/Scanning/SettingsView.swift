@@ -43,7 +43,7 @@ struct SettingsView: View {
                             Button {
                                 iconPickerSlot = i
                             } label: {
-                                Image(systemName: QuickTags.symbolName(quickTagSlots, i))
+                                QuickTagGlyph(symbol: QuickTags.symbolName(quickTagSlots, i))
                                     .frame(width: 22, height: 22)
                                     .background(Color.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 5))
                             }

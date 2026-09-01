@@ -15,7 +15,7 @@ struct QuickTagIndicator: View {
             let names = set.map { QuickTags.displayName(slots, $0) }.joined(separator: ", ")
             HStack(spacing: 6) {
                 ForEach(set, id: \.self) { i in
-                    Image(systemName: QuickTags.symbolName(slots, i))
+                    QuickTagGlyph(symbol: QuickTags.symbolName(slots, i))
                         .imageScale(.medium)
                         .foregroundStyle(.tint)
                 }
