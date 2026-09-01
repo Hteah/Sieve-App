@@ -22,7 +22,6 @@ struct SampleInspector: View {
 
     @AppStorage(QuickTags.storageKey) private var quickTagSlotsJSON = ""
     @State private var fullWaveform: WaveformSummary?
-    @State private var zoom: Double = 1
     @State private var notes = ""
     @State private var newTag = ""
     @State private var notesTask: Task<Void, Never>?
@@ -68,44 +67,30 @@ struct SampleInspector: View {
     private var waveformSection: some View {
         VStack(alignment: .leading, spacing: 6) {
             GeometryReader { geo in
-                ScrollView(.horizontal) {
-                    let summary = fullWaveform ?? row.waveform.flatMap(WaveformSummary.init(encoded:))
-                    let width = geo.size.width * zoom
-                    WaveformView(
-                        summary: summary,
-                        playhead: isCurrent && env.player.duration > 0 ? env.player.position / env.player.duration : nil,
-                        showGrid: true
-                    )
-                    .frame(width: width, height: 120)
-                    .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
-                    .contentShape(Rectangle())
-                    .highPriorityGesture(
-                        DragGesture(minimumDistance: 0)
-                            .onEnded { value in
-                                seek(max(0, min(1, value.location.x / max(1, width))))
-                            }
-                    )
-                }
-                .scrollIndicators(.automatic)
-                .scrollDisabled(zoom <= 1.0001)
+                let summary = fullWaveform ?? row.waveform.flatMap(WaveformSummary.init(encoded:))
+                WaveformView(
+                    summary: summary,
+                    playhead: isCurrent && env.player.duration > 0 ? env.player.position / env.player.duration : nil,
+                    showGrid: true
+                )
+                .frame(width: geo.size.width, height: 120)
+                .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
+                .contentShape(Rectangle())
+                .highPriorityGesture(
+                    DragGesture(minimumDistance: 0)
+                        .onEnded { value in
+                            seek(max(0, min(1, value.location.x / max(1, geo.size.width))))
+                        }
+                )
             }
             .frame(height: 120)
-            HStack {
-                Button {
-                    env.togglePreview(row)
-                } label: {
-                    Image(systemName: isCurrent && env.player.isPlaying ? "stop.fill" : "play.fill")
-                }
-                .keyboardShortcut(.space, modifiers: [])
-                .disabled(row.status != .present)
-                Text(isCurrent ? Fmt.duration(env.player.position) : "0.00s").monospacedDigit().font(.caption)
-                Text("/ \(Fmt.duration(row.durationSec))").monospacedDigit().font(.caption).foregroundStyle(.secondary)
-                Spacer()
-                Image(systemName: "minus.magnifyingglass").foregroundStyle(.secondary)
-                Slider(value: $zoom, in: 1...32).frame(width: 110)
-                    .onChange(of: zoom) { _, _ in Task { await regenerateWaveform() } }
-                Image(systemName: "plus.magnifyingglass").foregroundStyle(.secondary)
+            Button {
+                env.togglePreview(row)
+            } label: {
+                Image(systemName: isCurrent && env.player.isPlaying ? "stop.fill" : "play.fill")
             }
+            .keyboardShortcut(.space, modifiers: [])
+            .disabled(row.status != .present)
         }
     }
 
@@ -271,7 +256,7 @@ struct SampleInspector: View {
 
     private func regenerateWaveform() async {
         guard row.status == .present, let root = env.rootURL(for: row.rootId), let url = env.fileURL(for: row) else { return }
-        let buckets = min(16_384, Int(1024 * zoom))
+        let buckets = 1024
         let summary = await Task.detached(priority: .userInitiated) {
             withSecurityScope(root) { try? WaveformGenerator.summary(url: url, buckets: buckets) }
         }.value
