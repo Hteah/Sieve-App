@@ -353,15 +353,19 @@ final class EditorSession {
         player.play(clip, range: playbackRange, looping: looping)
     }
 
-    /// Stops playback, parking the cursor where the playhead was so Play resumes from there.
-    /// Reads the playhead unconditionally — a natural-end race can flip `player.isPlaying`
-    /// off just before this runs, and we still want the resume point. Skipped when a
-    /// selection is active (that always replays whole) or the playhead is at either edge.
+    /// Stops playback, parking the cursor where the playhead was so Play resumes from there —
+    /// the list preview's pause/resume, done with a cursor instead of a stored position.
+    /// `livePlayhead` is read (not `playheadFrame`) because the 30 Hz timer leaves that at the
+    /// range start for the first frame after `play()` and pinned at the range end through the
+    /// tail — a pause in either window would otherwise fail to record the real spot. A live
+    /// selection always replays whole, so its cursor is left alone; a playhead at/after the end
+    /// resets to 0 so the next Play starts over. Read before `stop()` so a natural-end race that
+    /// flips `isPlaying` off still lands on the end via `playheadFrame`.
     func stopPlayback() {
         let noSelection = selection.map(\.isEmpty) ?? true
-        let head = player.playheadFrame
-        if noSelection, head > 0, head < frameCount {
-            cursor = max(0, min(frameCount, head))
+        if noSelection {
+            let head = player.livePlayhead
+            cursor = head >= frameCount ? 0 : max(0, head)
             cursorInitialized = true
         }
         player.stop()

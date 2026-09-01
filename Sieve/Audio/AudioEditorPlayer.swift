@@ -35,6 +35,31 @@ final class AudioEditorPlayer {
     private(set) var playheadFrame = 0   // absolute frame within the clip
     var volume: Float = 1 { didSet { node.volume = volume } }
 
+    /// Raw frames elapsed since this play started — from the render clock once it's anchored,
+    /// otherwise the wall-clock fallback. Unclamped and un-wrapped; `nil` before either clock
+    /// is available. Side-effect free: it never anchors the render clock (`tick()` does that).
+    private var elapsedFrames: Int? {
+        if let anchor = nodeAnchor, let nodeTime = node.lastRenderTime,
+           let playerTime = node.playerTime(forNodeTime: nodeTime) {
+            return max(0, Int(playerTime.sampleTime - anchor))
+        }
+        if let start = playStartDate {
+            return max(0, Int(Date().timeIntervalSince(start) * clipSampleRate))
+        }
+        return nil
+    }
+
+    /// The playhead right now, mapped into the scheduled range with the same wrap/clamp as
+    /// `tick()`. `playheadFrame` is only refreshed by the 30 Hz timer — it lags for up to a
+    /// frame after `play()` and sits pinned at the range end through the tail — so a pause that
+    /// needs the exact resume point reads this instead. Reports the range start before the
+    /// first `tick()`, and `playheadFrame` once playback has stopped.
+    var livePlayhead: Int {
+        guard isPlaying, let elapsed = elapsedFrames else { return playheadFrame }
+        let played = isLooping ? elapsed % max(1, scheduledFrames) : min(elapsed, scheduledFrames)
+        return rangeStart + played
+    }
+
     init() { engine.attach(node) }
 
     /// Plays `range` of `clip` (whole clip when nil). `looping` reschedules the same buffer seamlessly.
@@ -140,23 +165,18 @@ final class AudioEditorPlayer {
     private func tick() {
         guard isPlaying else { return }
 
-        // Prefer the node's render clock so the playhead tracks the audio; anchor it on the
-        // first available reading of this play and subtract that out. Fall back to the wall
-        // clock until the render clock is up.
-        let elapsed: Int
-        if let nodeTime = node.lastRenderTime, let playerTime = node.playerTime(forNodeTime: nodeTime) {
-            if nodeAnchor == nil { nodeAnchor = playerTime.sampleTime }
-            elapsed = max(0, Int(playerTime.sampleTime - (nodeAnchor ?? 0)))
-        } else if let start = playStartDate {
-            elapsed = max(0, Int(Date().timeIntervalSince(start) * clipSampleRate))
-        } else {
-            return
+        // Anchor the render clock on its first available reading this play; from here on
+        // `elapsedFrames` (and thus `livePlayhead`) prefer it over the wall clock, which runs
+        // ahead of the sound by the engine's start-up latency.
+        if nodeAnchor == nil, let nodeTime = node.lastRenderTime,
+           let playerTime = node.playerTime(forNodeTime: nodeTime) {
+            nodeAnchor = playerTime.sampleTime
         }
+        guard let elapsed = elapsedFrames else { return }
 
-        // Wrap while looping; otherwise clamp so a tick at the boundary can't snap the
-        // playhead back to the range start before `bufferFinished` lands.
-        let played = isLooping ? elapsed % max(1, scheduledFrames) : min(elapsed, scheduledFrames)
-        playheadFrame = rangeStart + played
+        // `livePlayhead` wraps while looping and otherwise clamps to the range end, so a tick at
+        // the boundary can't snap the playhead back to the range start before `bufferFinished` lands.
+        playheadFrame = livePlayhead
         // End on the .dataPlayedBack callback, which tracks real audio. Only fall back to the
         // clock well past the end (a quarter second), so this can't pre-empt playback that is
         // still sounding and desync play/pause.
