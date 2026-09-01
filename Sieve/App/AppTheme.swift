@@ -97,16 +97,18 @@ enum AppAppearance: String, CaseIterable, Identifiable {
     var colorScheme: ColorScheme? {
         switch self {
         case .system: nil
-        case .light: .light
-        case .dark, .grey, .industrial: .dark
+        case .light, .grey: .light
+        case .dark, .industrial: .dark
         }
     }
 
-    /// A screen-wide colour wash layered over the base scheme (nil = none).
-    var wash: (color: Color, opacity: Double)? {
+    /// A screen-wide colour wash layered over the base scheme (nil = none). `blend` is how it
+    /// combines: `.plusLighter` lifts a dark base toward the tint, `.multiply` takes a light
+    /// base down toward it.
+    var wash: (color: Color, opacity: Double, blend: BlendMode)? {
         switch self {
-        case .grey: (Color(.sRGB, red: 0.44, green: 0.47, blue: 0.52, opacity: 1), 0.28)   // cool mid grey lift
-        case .industrial: (Color(.sRGB, red: 0.36, green: 0.38, blue: 0.42, opacity: 1), 0.22)
+        case .grey: (Color(.sRGB, red: 0.58, green: 0.61, blue: 0.66, opacity: 1), 0.70, .multiply)   // cool light-grey paper
+        case .industrial: (Color(.sRGB, red: 0.36, green: 0.38, blue: 0.42, opacity: 1), 0.22, .plusLighter)
         default: nil
         }
     }
@@ -131,7 +133,7 @@ struct Themed: ViewModifier {
                     Rectangle()
                         .fill(wash.color)
                         .opacity(wash.opacity)
-                        .blendMode(.plusLighter)
+                        .blendMode(wash.blend)
                         .allowsHitTesting(false)
                         .ignoresSafeArea()
                 }
