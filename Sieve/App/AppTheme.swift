@@ -82,7 +82,7 @@ enum AppTheme: String, CaseIterable, Identifiable {
 }
 
 enum AppAppearance: String, CaseIterable, Identifiable {
-    case system, light, dark, industrial
+    case system, light, dark, grey, industrial
 
     var id: String { rawValue }
     var label: String {
@@ -90,6 +90,7 @@ enum AppAppearance: String, CaseIterable, Identifiable {
         case .system: "System"
         case .light: "Light"
         case .dark: "Dark"
+        case .grey: "Grey"
         case .industrial: "Industrial Grey"
         }
     }
@@ -97,13 +98,14 @@ enum AppAppearance: String, CaseIterable, Identifiable {
         switch self {
         case .system: nil
         case .light: .light
-        case .dark, .industrial: .dark
+        case .dark, .grey, .industrial: .dark
         }
     }
 
     /// A screen-wide colour wash layered over the base scheme (nil = none).
     var wash: (color: Color, opacity: Double)? {
         switch self {
+        case .grey: (Color(white: 0.46), 0.30)   // neutral mid grey lift
         case .industrial: (Color(.sRGB, red: 0.36, green: 0.38, blue: 0.42, opacity: 1), 0.22)
         default: nil
         }
