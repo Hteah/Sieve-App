@@ -96,7 +96,7 @@ struct ContentView: View {
                 Image(systemName: sidebarShown ? "sidebar.leading" : "sidebar.left")
                     .foregroundStyle(sidebarShown ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
             }
-            .infoBubble(sidebarShown ? "Hide sidebar" : "Show sidebar")
+            .infoBubble(sidebarShown ? "Hide sidebar" : "Show sidebar", align: .leading)
             .keyboardShortcut("s", modifiers: [.control, .command])
 
             Spacer(minLength: 0)
@@ -114,7 +114,7 @@ struct ContentView: View {
                 Image(systemName: showInspector ? "sidebar.trailing" : "sidebar.right")
                     .foregroundStyle(showInspector ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
             }
-            .infoBubble(showInspector ? "Hide inspector" : "Show inspector")
+            .infoBubble(showInspector ? "Hide inspector" : "Show inspector", align: .trailing)
             .keyboardShortcut("i", modifiers: [.control, .command])
         }
         .buttonStyle(.borderless)
