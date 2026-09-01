@@ -8,9 +8,7 @@ struct ContentView: View {
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @State private var followTask: Task<Void, Never>?
 
-    private var sidebarShown: Bool {
-        showInspector ? (columnVisibility == .all) : (columnVisibility != .detailOnly)
-    }
+    private var sidebarShown: Bool { columnVisibility != .detailOnly }
 
     var body: some View {
         Group {
@@ -56,29 +54,18 @@ struct ContentView: View {
         }
     }
 
-    /// Three real split-view columns (sidebar / list / inspector) when the inspector is shown,
-    /// dropping to two when it is hidden. A true column resizes by its divider only and never
-    /// grows the window.
-    @ViewBuilder
+    /// Sidebar + list in a two-column split view; the info pane rides alongside as a
+    /// native `.inspector`, so showing/hiding it slides one pane instead of rebuilding
+    /// the whole split view. Fixed width, so it never grows with the window.
     private func splitView(_ model: LibraryViewModel) -> some View {
-        if showInspector {
-            NavigationSplitView(columnVisibility: $columnVisibility) {
-                sidebar(model)
-            } content: {
-                centerPane(model)
-                    .navigationSplitViewColumnWidth(min: 320, ideal: 640)
-            } detail: {
-                InspectorView(model: model)
-                    // Fixed width, matched to the sidebar. A single value makes the column
-                    // non-resizable, so growing the window only stretches the center list.
-                    .navigationSplitViewColumnWidth(235)
-            }
-        } else {
-            NavigationSplitView(columnVisibility: $columnVisibility) {
-                sidebar(model)
-            } detail: {
-                centerPane(model)
-            }
+        NavigationSplitView(columnVisibility: $columnVisibility) {
+            sidebar(model)
+        } detail: {
+            centerPane(model)
+                .inspector(isPresented: $showInspector) {
+                    InspectorView(model: model)
+                        .inspectorColumnWidth(235)
+                }
         }
     }
 
@@ -135,18 +122,11 @@ struct ContentView: View {
 
     private func toggleSidebar() {
         withAnimation {
-            if showInspector {
-                columnVisibility = (columnVisibility == .all) ? .doubleColumn : .all
-            } else {
-                columnVisibility = (columnVisibility == .detailOnly) ? .all : .detailOnly
-            }
+            columnVisibility = (columnVisibility == .detailOnly) ? .all : .detailOnly
         }
     }
 
     private func toggleInspector() {
-        withAnimation {
-            showInspector.toggle()
-            if columnVisibility == .doubleColumn { columnVisibility = .all }
-        }
+        withAnimation { showInspector.toggle() }
     }
 }
