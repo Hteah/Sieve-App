@@ -9,6 +9,8 @@ struct ContentView: View {
     @State private var showInspector = UserDefaults.standard.object(forKey: "showInspector") as? Bool ?? true
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @State private var followTask: Task<Void, Never>?
+    @State private var controlHint = ControlHint()
+    @AppStorage("showControlInfo") private var showControlInfo = false
 
     private var sidebarShown: Bool { columnVisibility != .detailOnly }
 
@@ -17,6 +19,8 @@ struct ContentView: View {
             if let model {
                 splitView(model)
                     .navigationSplitViewStyle(.balanced)
+                    .environment(controlHint)
+                    .safeAreaInset(edge: .bottom, spacing: 0) { hintStrip }
                     .toolbar {
                         ToolbarItemGroup(placement: .primaryAction) {
                             Button { Task { await env.addRootViaPanel() } } label: { Label("Add Folder", systemImage: "folder.badge.plus") }
@@ -96,7 +100,7 @@ struct ContentView: View {
                 Image(systemName: sidebarShown ? "sidebar.leading" : "sidebar.left")
                     .foregroundStyle(sidebarShown ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
             }
-            .infoBubble(sidebarShown ? "Hide sidebar" : "Show sidebar", align: .leading)
+            .infoBubble(sidebarShown ? "Hide sidebar" : "Show sidebar")
             .keyboardShortcut("s", modifiers: [.control, .command])
 
             Spacer(minLength: 0)
@@ -114,7 +118,7 @@ struct ContentView: View {
                 Image(systemName: showInspector ? "sidebar.trailing" : "sidebar.right")
                     .foregroundStyle(showInspector ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
             }
-            .infoBubble(showInspector ? "Hide inspector" : "Show inspector", align: .trailing)
+            .infoBubble(showInspector ? "Hide inspector" : "Show inspector")
             .keyboardShortcut("i", modifiers: [.control, .command])
         }
         .buttonStyle(.borderless)
@@ -123,6 +127,27 @@ struct ContentView: View {
         .padding(.vertical, 5)
         .background(.bar)
         .overlay(alignment: .bottom) { Divider() }
+    }
+
+    /// Bottom-edge strip that echoes the hovered control's description while
+    /// "Show Control Info" is on. Fixed height so hovering never shifts the layout.
+    @ViewBuilder
+    private var hintStrip: some View {
+        if showControlInfo {
+            HStack(spacing: 0) {
+                Text(controlHint.text)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .animation(.easeOut(duration: 0.1), value: controlHint.text)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 10)
+            .frame(height: 20)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(.bar)
+            .overlay(alignment: .top) { Divider() }
+        }
     }
 
     private func toggleSidebar() {
