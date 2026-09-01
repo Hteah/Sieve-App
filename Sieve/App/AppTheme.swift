@@ -105,7 +105,7 @@ enum AppAppearance: String, CaseIterable, Identifiable {
     /// A screen-wide colour wash layered over the base scheme (nil = none).
     var wash: (color: Color, opacity: Double)? {
         switch self {
-        case .grey: (Color(white: 0.46), 0.30)   // neutral mid grey lift
+        case .grey: (Color(.sRGB, red: 0.44, green: 0.47, blue: 0.52, opacity: 1), 0.28)   // cool mid grey lift
         case .industrial: (Color(.sRGB, red: 0.36, green: 0.38, blue: 0.42, opacity: 1), 0.22)
         default: nil
         }
