@@ -69,7 +69,9 @@ struct ContentView: View {
                     .navigationSplitViewColumnWidth(min: 320, ideal: 640)
             } detail: {
                 InspectorView(model: model)
-                    .navigationSplitViewColumnWidth(min: 260, ideal: 340, max: 560)
+                    // Fixed width, matched to the sidebar. A single value makes the column
+                    // non-resizable, so growing the window only stretches the center list.
+                    .navigationSplitViewColumnWidth(200)
             }
         } else {
             NavigationSplitView(columnVisibility: $columnVisibility) {
