@@ -27,15 +27,13 @@ enum QuickTags {
         // Waveforms & signal
         "waveform", "waveform.circle.fill", "waveform.path", "waveform.path.ecg",
         "waveform.badge.plus", "waveform.badge.mic", "waveform.slash",
-        "dot.radiowaves.left.and.right", "dot.radiowaves.right", "dot.radiowaves.up.forward",
-        "antenna.radiowaves.left.and.right", "badge.plus.radiowaves.right",
         "wave.3.forward", "wave.3.left", "wave.3.right",
         // Notes & instruments
         "music.note", "music.note.list", "music.quarternote.3", "music.mic",
-        "metronome.fill", "tuningfork", "pianokeys", "pianokeys.inverse", "guitars.fill", "amplifier",
+        "tuningfork", "pianokeys", "pianokeys.inverse", "guitars.fill", "amplifier",
         // Playback / speakers / headphones
         "speaker.wave.2.fill", "speaker.wave.3.fill", "hifispeaker.fill", "hifispeaker.2.fill",
-        "headphones", "earbuds", "airpodspro", "radio.fill",
+        "headphones", "radio.fill",
         "recordingtape", "recordingtape.circle", "opticaldisc.fill", "opticaldiscdrive.fill",
         // Mic / recording / meters
         "mic.fill", "mic.circle.fill", "mic.and.signal.meter.fill", "gauge.with.dots.needle.bottom.50percent",
