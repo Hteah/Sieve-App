@@ -1,47 +1,15 @@
 import SwiftUI
 
 struct InspectorView: View {
-    @Environment(AppEnvironment.self) private var env
-    @Environment(\.openWindow) private var openWindow
     @Bindable var model: LibraryViewModel
-    @AppStorage("inspectorTab") private var tab = InspectorTab.info
-
-    enum InspectorTab: String { case info, edit }
 
     var body: some View {
-        VStack(spacing: 0) {
-            Picker("", selection: $tab) {
-                Text("Info").tag(InspectorTab.info)
-                Text("Edit").tag(InspectorTab.edit)
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            Divider()
-
-            switch tab {
-            case .info:
-                if let row = model.primarySelection {
-                    SampleInspector(row: row, selectionCount: model.selection.count, selectedRows: model.selectedRows)
-                        .id(row.id)
-                } else {
-                    ContentUnavailableView("No Selection", systemImage: "waveform",
-                                           description: Text("Select a sample to see details."))
-                }
-            case .edit:
-                if env.editor.windowOpen {
-                    ContentUnavailableView {
-                        Label("Editing in a Separate Window", systemImage: "macwindow")
-                    } description: {
-                        Text("The audio editor is open in its own window.")
-                    } actions: {
-                        Button("Bring Editor to Front") { openWindow(id: "audio-editor") }
-                    }
-                } else {
-                    AudioEditorView(currentRow: model.primarySelection)
-                }
-            }
+        if let row = model.primarySelection {
+            SampleInspector(row: row, selectionCount: model.selection.count, selectedRows: model.selectedRows)
+                .id(row.id)
+        } else {
+            ContentUnavailableView("No Selection", systemImage: "waveform",
+                                   description: Text("Select a sample to see details."))
         }
     }
 }
