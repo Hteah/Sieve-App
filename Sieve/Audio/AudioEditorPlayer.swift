@@ -17,10 +17,14 @@ final class AudioEditorPlayer {
     private var scheduledFrames = 0
     private var isLooping = false
     private var clipSampleRate: Double = 44_100
-    /// Playhead runs off a wall clock, not `node.playerTime`: the node's sample time keeps
-    /// accumulating across stop()/reschedule cycles instead of resetting, which threw the
-    /// playhead off on the first resume and desynced play/pause.
+    /// Playhead is driven by the node's render clock (`playerTime.sampleTime`) so it stays in
+    /// sync with the audio — important for short selections / loops where engine start-up
+    /// latency is a big fraction of playback. `nodeAnchor` is that clock's value captured on
+    /// the first tick of each play, subtracted out so the count across stop()/reschedule
+    /// cycles doesn't matter. `playStartDate` is a wall-clock fallback for the ticks before
+    /// the render clock is available.
     private var playStartDate: Date?
+    private var nodeAnchor: AVAudioFramePosition?
     /// Bumped on every schedule and every stop; a buffer-completion callback is honoured only
     /// while its token is current, so a stop()'d buffer can't land a stale "finished" on the
     /// next play (which would jump the playhead to the end and desync play/pause).
@@ -57,6 +61,7 @@ final class AudioEditorPlayer {
             isPlaying = true
             playheadFrame = r.lowerBound
             playStartDate = Date()
+            nodeAnchor = nil
             startTimer()
         } catch {
             Self.log.error("editor play failed: \(error, privacy: .public)")
@@ -69,6 +74,7 @@ final class AudioEditorPlayer {
         timer?.invalidate(); timer = nil
         isPlaying = false
         playStartDate = nil
+        nodeAnchor = nil
     }
 
     private func bufferFinished(token: Int, looping: Bool) {
@@ -132,15 +138,28 @@ final class AudioEditorPlayer {
     }
 
     private func tick() {
-        guard isPlaying, let start = playStartDate else { return }
-        let elapsed = max(0, Int(Date().timeIntervalSince(start) * clipSampleRate))
+        guard isPlaying else { return }
+
+        // Prefer the node's render clock so the playhead tracks the audio; anchor it on the
+        // first available reading of this play and subtract that out. Fall back to the wall
+        // clock until the render clock is up.
+        let elapsed: Int
+        if let nodeTime = node.lastRenderTime, let playerTime = node.playerTime(forNodeTime: nodeTime) {
+            if nodeAnchor == nil { nodeAnchor = playerTime.sampleTime }
+            elapsed = max(0, Int(playerTime.sampleTime - (nodeAnchor ?? 0)))
+        } else if let start = playStartDate {
+            elapsed = max(0, Int(Date().timeIntervalSince(start) * clipSampleRate))
+        } else {
+            return
+        }
+
         // Wrap while looping; otherwise clamp so a tick at the boundary can't snap the
         // playhead back to the range start before `bufferFinished` lands.
         let played = isLooping ? elapsed % max(1, scheduledFrames) : min(elapsed, scheduledFrames)
         playheadFrame = rangeStart + played
         // End on the .dataPlayedBack callback, which tracks real audio. Only fall back to the
-        // wall clock well past the end (a quarter second), so this can't pre-empt playback
-        // that is still sounding and desync play/pause.
+        // clock well past the end (a quarter second), so this can't pre-empt playback that is
+        // still sounding and desync play/pause.
         if !isLooping, elapsed >= scheduledFrames + Int(clipSampleRate / 4) {
             bufferFinished(token: playToken, looping: false)
         }
