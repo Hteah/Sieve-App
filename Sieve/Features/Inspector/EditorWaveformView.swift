@@ -21,6 +21,8 @@ struct EditorWaveformView: View {
     var resetToken: AnyHashable?
     /// Draws an m:ss time ruler along the bottom (pop-out editor only).
     var showsTimeRuler = false
+    /// While zoomed in and playing, keep the playhead on screen by paging the visible window.
+    var followPlayhead = false
 
     @AppStorage("appTheme") private var themeRaw = AppTheme.system.rawValue
     private var accent: Color { AppTheme.current(themeRaw).waveformColor }
@@ -79,6 +81,7 @@ struct EditorWaveformView: View {
                 if visibleFrames > newValue { visibleFrames = 0 }
                 visibleStart = min(visibleStart, max(0, newValue - 1))
             }
+            .onChange(of: playheadFrame) { _, f in followIfNeeded(to: f) }
         }
     }
 
@@ -197,6 +200,21 @@ struct EditorWaveformView: View {
             .fixedSize()
             .offset(x: min(max(0, rawX), max(0, width - 260)) + 4, y: 4)
         }
+    }
+
+    /// Scrolls the visible window so the playhead sits at the centre and the waveform slides
+    /// under it. Clamps at the clip edges (the playhead drifts off-centre there). No-op when
+    /// the whole clip is already visible.
+    private func followIfNeeded(to frame: Int?) {
+        guard followPlayhead, let f = frame else { return }
+        let n = clip.frameCount
+        guard n > 0 else { return }
+        let span = visibleFrames > 0 ? min(visibleFrames, n) : n
+        guard span < n else { return }
+        let target = max(0, min(n - span, f - span / 2))
+        guard target != min(max(0, visibleStart), max(0, n - span)) else { return }
+        visibleFrames = span
+        visibleStart = target
     }
 
     private func pan(pixels dx: CGFloat, width: CGFloat, n: Int, span: Int, start: Int) {

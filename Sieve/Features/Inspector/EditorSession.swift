@@ -324,6 +324,10 @@ final class EditorSession {
     /// first Play seeding from the list preview). Reset when a new file loads.
     private var cursorInitialized = false
 
+    /// Once the editor's own transport has moved the playhead, its waveform line should track
+    /// `cursor` — not a list preview that happens to be playing the same file.
+    var hasAnchoredPlayhead: Bool { cursorInitialized }
+
     /// What Play / Loop act on: the selection if there is one, otherwise from the cursor to the end.
     private var playbackRange: Range<Int> {
         guard let clip, clip.frameCount > 0 else { return 0..<0 }

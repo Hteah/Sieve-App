@@ -15,6 +15,7 @@ struct AudioEditorView: View {
 
     @AppStorage("editorNormalizeDb") private var normalizeDb = -1.0
     @AppStorage("editorFloatOnTop") private var floatOnTop = true
+    @AppStorage("editorFollowPlayhead") private var followPlayhead = false
 
     @State private var saveBits: BitDepthOption = .int24
     @State private var amplifyDb = 0.0
@@ -102,6 +103,12 @@ struct AudioEditorView: View {
             Spacer()
             if session.isBusy { ProgressView().controlSize(.small) }
             if isPopOut {
+                Toggle(isOn: $followPlayhead) {
+                    Image(systemName: "location.north.line")
+                }
+                .toggleStyle(.button)
+                .help(followPlayhead ? "Waveform follows the playhead during playback — click to stop"
+                                     : "Keep the playhead on screen during playback")
                 Button { floatOnTop.toggle() } label: {
                     Image(systemName: floatOnTop ? "pin.fill" : "pin")
                 }
@@ -139,17 +146,21 @@ struct AudioEditorView: View {
             onSelectionCommitted: { session.startPlayback() },   // jump playback to the new selection
             onApplyGain: { session.applyPreviewGain() },
             resetToken: session.source?.sampleId,
-            showsTimeRuler: isPopOut
+            showsTimeRuler: isPopOut,
+            followPlayhead: followPlayhead
         )
         // Match the Info tab's 120 pt waveform inline; let the pop-out window use the room.
         .frame(height: isPopOut ? nil : 120)
         .frame(maxHeight: isPopOut ? .infinity : nil)
     }
 
-    /// While playing: the editor's own playhead (or the list preview's, if that's what's playing
-    /// this file). While stopped: the click cursor, so you can see where playback will start.
+    /// The editor's playhead line. Its own playback wins; once its transport has run at all it
+    /// tracks `cursor` (so a list preview started meanwhile doesn't hijack the line). Only
+    /// before the editor has been touched does it mirror a list preview of this same file, so
+    /// you can see where the first Play will pick up.
     private var mirroredPlayhead: Int? {
         if session.player.isPlaying { return session.player.playheadFrame }
+        if session.hasAnchoredPlayhead { return session.hasClip ? session.cursor : nil }
         if env.player.currentSampleId == session.source?.sampleId, env.player.isPlaying,
            env.player.duration > 0, session.frameCount > 0 {
             return Int(env.player.position / env.player.duration * Double(session.frameCount))
