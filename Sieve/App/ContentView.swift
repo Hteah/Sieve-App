@@ -4,7 +4,9 @@ struct ContentView: View {
     @Environment(AppEnvironment.self) private var env
     @Environment(\.openWindow) private var openWindow
     @State private var model: LibraryViewModel?
-    @AppStorage("showInspector") private var showInspector = true
+    // Source of truth is @State: an @AppStorage binding handed to `.inspector`
+    // lags a frame, so the first toggle click can read back stale. Persisted on change.
+    @State private var showInspector = UserDefaults.standard.object(forKey: "showInspector") as? Bool ?? true
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @State private var followTask: Task<Void, Never>?
 
@@ -47,6 +49,9 @@ struct ContentView: View {
             }
         }
         .onAppear { if model == nil { model = LibraryViewModel(database: env.database) } }
+        .onChange(of: showInspector) { _, shown in
+            UserDefaults.standard.set(shown, forKey: "showInspector")
+        }
         .alert("Something went wrong", isPresented: Binding(get: { env.lastError != nil }, set: { if !$0 { env.lastError = nil } })) {
             Button("OK") { env.lastError = nil }
         } message: {
@@ -127,6 +132,6 @@ struct ContentView: View {
     }
 
     private func toggleInspector() {
-        withAnimation { showInspector.toggle() }
+        withAnimation(.snappy(duration: 0.2)) { showInspector.toggle() }
     }
 }
