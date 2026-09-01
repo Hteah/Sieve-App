@@ -51,6 +51,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.arlo.Sieve
         CODE_SIGN_ENTITLEMENTS: Sieve/App/Sieve.entitlements
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
   SieveTests:
     type: bundle.unit-test
     platform: macOS
