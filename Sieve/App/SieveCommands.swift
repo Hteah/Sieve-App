@@ -2,6 +2,7 @@ import SwiftUI
 
 struct SieveCommands: Commands {
     let env: AppEnvironment
+    @AppStorage("showControlInfo") private var showControlInfo = false
 
     var body: some Commands {
         CommandGroup(after: .newItem) {
@@ -11,6 +12,9 @@ struct SieveCommands: Commands {
                 .keyboardShortcut("r", modifiers: [.command])
             Divider()
             Button("Purge Missing Samples") { Task { await env.scanner.purgeMissing() } }
+        }
+        CommandGroup(after: .sidebar) {
+            Toggle("Show Control Info", isOn: $showControlInfo)
         }
     }
 }

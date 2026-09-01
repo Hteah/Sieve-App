@@ -20,9 +20,9 @@ struct ContentView: View {
                     .toolbar {
                         ToolbarItemGroup(placement: .primaryAction) {
                             Button { Task { await env.addRootViaPanel() } } label: { Label("Add Folder", systemImage: "folder.badge.plus") }
-                                .help("Add a folder of samples")
+                                .infoBubble("Add a folder of samples")
                             Button { Task { await env.scanner.scanAll() } } label: { Label("Rescan", systemImage: "arrow.clockwise") }
-                                .help("Rescan all folders")
+                                .infoBubble("Rescan all folders")
                                 .disabled(env.scanState.isScanning)
                         }
                     }
@@ -102,7 +102,7 @@ struct ContentView: View {
                 Image(systemName: sidebarShown ? "sidebar.leading" : "sidebar.left")
                     .foregroundStyle(sidebarShown ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
             }
-            .help(sidebarShown ? "Hide sidebar" : "Show sidebar")
+            .infoBubble(sidebarShown ? "Hide sidebar" : "Show sidebar")
             .keyboardShortcut("s", modifiers: [.control, .command])
 
             Spacer(minLength: 0)
@@ -113,14 +113,14 @@ struct ContentView: View {
             } label: {
                 Image(systemName: "waveform")
             }
-            .help("Open the wave editor window")
+            .infoBubble("Open the wave editor window")
             .padding(.trailing, 12)
 
             Button { toggleInspector() } label: {
                 Image(systemName: showInspector ? "sidebar.trailing" : "sidebar.right")
                     .foregroundStyle(showInspector ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
             }
-            .help(showInspector ? "Hide inspector" : "Show inspector")
+            .infoBubble(showInspector ? "Hide inspector" : "Show inspector")
             .keyboardShortcut("i", modifiers: [.control, .command])
         }
         .buttonStyle(.borderless)

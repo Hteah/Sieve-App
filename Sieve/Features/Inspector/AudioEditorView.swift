@@ -104,21 +104,22 @@ struct AudioEditorView: View {
             if session.isBusy { ProgressView().controlSize(.small) }
             if isPopOut {
                 Toggle(isOn: $followPlayhead) {
-                    Image(systemName: "location.north.line")
+                    FollowPlayheadIcon()
                 }
                 .toggleStyle(.button)
-                .help(followPlayhead ? "Waveform follows the playhead during playback — click to stop"
+                .infoBubble(followPlayhead ? "Waveform follows the playhead during playback — click to stop"
                                      : "Keep the playhead on screen during playback")
-                Button { floatOnTop.toggle() } label: {
-                    Image(systemName: floatOnTop ? "pin.fill" : "pin")
+                Toggle(isOn: $floatOnTop) {
+                    Image(systemName: "pip.enter")
                 }
-                .help(floatOnTop ? "Floating above other windows — click to stop"
+                .toggleStyle(.button)
+                .infoBubble(floatOnTop ? "Floating above other windows — click to stop"
                                  : "Click to keep this window above others")
             } else {
                 Button { openWindow(id: "audio-editor") } label: {
                     Image(systemName: "macwindow.on.rectangle")
                 }
-                .help("Open the editor in a separate window")
+                .infoBubble("Open the editor in a separate window")
             }
         }
     }
@@ -174,13 +175,13 @@ struct AudioEditorView: View {
             Button { session.togglePlay() } label: {
                 Image(systemName: session.player.isPlaying ? "stop.fill" : "play.fill")
             }
-            .help(session.hasSelection ? "Play the selection" : "Play from the cursor")
+            .infoBubble(session.hasSelection ? "Play the selection" : "Play from the cursor")
             .modifier(SpaceToToggle(enabled: isPopOut))
             Toggle(isOn: Binding(get: { session.looping }, set: { session.looping = $0 })) {
                 Image(systemName: "repeat")
             }
             .toggleStyle(.button)
-            .help(session.hasSelection ? "Loop the selection" : "Loop")
+            .infoBubble(session.hasSelection ? "Loop the selection" : "Loop")
 
             Text(Fmt.duration(Double(mirroredPlayhead ?? 0) / max(1, session.sampleRate)))
                 .font(.caption).monospacedDigit().foregroundStyle(.secondary)
@@ -206,7 +207,7 @@ struct AudioEditorView: View {
             Image(systemName: recorder.isRecording ? "stop.fill" : "record.circle")
         }
         .tint(.red)
-        .help(recorder.isRecording ? "Stop recording" : "Record the editor's playback to a new WAV")
+        .infoBubble(recorder.isRecording ? "Stop recording" : "Record the editor's playback to a new WAV")
     }
 
     @ViewBuilder private var recordingBanner: some View {
