@@ -82,26 +82,33 @@ struct SampleListView: View {
                 .width(76).customizationID("rating")
                 TableColumn("Quick Tag") { row in
                     let slots = QuickTags.load(quickTagSlotsJSON)
-                    Menu {
-                        ForEach(0..<QuickTags.count, id: \.self) { i in
-                            Toggle(isOn: Binding(
-                                get: { QuickTags.isSet(row.quickTags ?? 0, i) },
-                                set: { _ in Task { try? await AnnotationStore(database: env.database).toggleQuickTag(i, for: [row]) } })) {
-                                QuickTagMenuLabel(slots: slots, index: i)
-                            }
-                        }
-                        Divider()
-                        Button("None") {
-                            Task { try? await AnnotationStore(database: env.database).setQuickTagMask(0, for: row) }
-                        }
-                        .disabled((row.quickTags ?? 0) == 0)
-                    } label: {
+                    // The indicator is drawn as plain cell content: AppKit renders a menu's
+                    // label, and it drops the custom-drawn oscillator glyphs (text/SF Symbols
+                    // only). The assign menu sits on top with a clear label so a click still
+                    // opens it.
+                    ZStack(alignment: .leading) {
                         QuickTagIndicator(mask: row.quickTags ?? 0, slots: slots)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .contentShape(Rectangle())
+                            .allowsHitTesting(false)
+                        Menu {
+                            ForEach(0..<QuickTags.count, id: \.self) { i in
+                                Toggle(isOn: Binding(
+                                    get: { QuickTags.isSet(row.quickTags ?? 0, i) },
+                                    set: { _ in Task { try? await AnnotationStore(database: env.database).toggleQuickTag(i, for: [row]) } })) {
+                                    QuickTagMenuLabel(slots: slots, index: i)
+                                }
+                            }
+                            Divider()
+                            Button("None") {
+                                Task { try? await AnnotationStore(database: env.database).setQuickTagMask(0, for: row) }
+                            }
+                            .disabled((row.quickTags ?? 0) == 0)
+                        } label: {
+                            Color.clear.contentShape(Rectangle())
+                        }
+                        .menuStyle(.borderlessButton)
+                        .menuIndicator(.hidden)
                     }
-                    .menuStyle(.borderlessButton)
-                    .menuIndicator(.hidden)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .width(min: 60, ideal: 96, max: 160).customizationID("quickTag")
                 TableColumn("Size", value: \.fileSize) { row in
