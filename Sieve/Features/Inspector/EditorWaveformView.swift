@@ -184,13 +184,30 @@ struct EditorWaveformView: View {
         let clamped = max(0.2, min(5, factor))
         var newSpan = Int((Double(span) / clamped).rounded())
 
-        // Zooming in with a selection: frame the selection (first step) and then tighten
-        // around its centre, keeping it in the middle of the view.
+        // Zooming in with a selection.
         if anchorOnSelection, clamped > 1, let sel = selection, !sel.isEmpty {
-            newSpan = min(newSpan, max(sel.count * 6 / 5, minSpan))
             newSpan = max(minSpan, min(n, newSpan))
-            let mid = (sel.lowerBound + sel.upperBound) / 2
-            let newStart = max(0, min(n - newSpan, mid - newSpan / 2))
+            let frac = Double(max(0, min(width, x)) / max(1, width))
+            let newStart: Int
+            if span > sel.count {
+                // Phase 1: view still wider than the selection — frame it, centred.
+                newSpan = min(newSpan, max(sel.count * 6 / 5, minSpan))
+                let mid = (sel.lowerBound + sel.upperBound) / 2
+                newStart = max(0, min(n - newSpan, mid - newSpan / 2))
+            } else {
+                // Phase 2: inside the selection. Zoom toward the pointer — but if it's at a
+                // side and that selection marker is still off-screen, pull the marker in.
+                let edge = 0.22
+                let anchorFrame: Double
+                if frac <= edge, sel.lowerBound < start {
+                    anchorFrame = Double(sel.lowerBound)
+                } else if frac >= 1 - edge, sel.upperBound > start + span {
+                    anchorFrame = Double(sel.upperBound)
+                } else {
+                    anchorFrame = Double(start) + frac * Double(span)
+                }
+                newStart = max(0, min(n - newSpan, Int((anchorFrame - frac * Double(newSpan)).rounded())))
+            }
             visibleFrames = newSpan == n ? 0 : newSpan
             visibleStart = newStart
             return
