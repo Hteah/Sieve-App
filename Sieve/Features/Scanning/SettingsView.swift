@@ -70,7 +70,7 @@ struct SettingsView: View {
 
             Divider()
 
-            LabeledContent("Audio editor") {
+            LabeledContent("External editor") {
                 HStack(spacing: 8) {
                     Text(env.audioEditorName ?? "Not set")
                         .foregroundStyle(env.audioEditorName == nil ? AnyShapeStyle(.secondary) : AnyShapeStyle(.primary))
@@ -81,7 +81,7 @@ struct SettingsView: View {
                     }
                 }
             }
-            Text("The “Open in…” button in the inspector and the sample’s context menu send it to this app.")
+            Text("The “Open in External Editor” button in the inspector and the sample’s context menu send it to this app.")
                 .font(.caption).foregroundStyle(.secondary)
 
             Divider()

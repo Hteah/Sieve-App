@@ -122,10 +122,10 @@ struct SampleListView: View {
                 if let first = rows.first {
                     Button("Play") { env.preview(first) }
                     Button("Reveal in Finder") { env.revealInFinder(first) }
-                    Button(env.audioEditorName.map { "Open in \($0)" } ?? "Open in Audio Editor…") {
-                        env.openInAudioEditor(first)
-                    }
-                    .disabled(first.status != .present)
+                    Button("Open in External Editor") { env.openInAudioEditor(first) }
+                        .help(env.audioEditorName.map { "Send this sample to \($0)" }
+                              ?? "Pick an external audio editor, then send this sample to it")
+                        .disabled(first.status != .present)
                     Button("Open in Wave Editor") {
                         env.editor.noteListSelection(first)
                         openWindow(id: "audio-editor")

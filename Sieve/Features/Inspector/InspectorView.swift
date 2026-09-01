@@ -273,12 +273,13 @@ struct SampleInspector: View {
     }
 
     private var actionButtons: some View {
-        HStack {
+        VStack(spacing: 6) {
             Button("Reveal in Finder") { env.revealInFinder(row) }
-            Button(env.audioEditorName.map { "Open in \($0)" } ?? "Open in Audio Editor…") {
-                env.openInAudioEditor(row)
-            }
-            .help(env.audioEditorName == nil ? "Pick an audio editor, then send this sample to it" : "Send this sample to \(env.audioEditorName!)")
+                .frame(maxWidth: .infinity)
+            Button("Open in External Editor") { env.openInAudioEditor(row) }
+                .frame(maxWidth: .infinity)
+                .help(env.audioEditorName.map { "Send this sample to \($0)" }
+                      ?? "Pick an external audio editor, then send this sample to it")
         }
         .controlSize(.small)
         .disabled(row.status != .present)
