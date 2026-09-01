@@ -31,6 +31,17 @@ final class AudioEditorPlayer {
     private(set) var playheadFrame = 0   // absolute frame within the clip
     var volume: Float = 1 { didSet { node.volume = volume } }
 
+    /// The playhead right now, recomputed from the wall clock. `playheadFrame` is only
+    /// refreshed by the 30 Hz timer, so it lags for up to a frame after `play()` and sits
+    /// pinned at the range end through the tail; a pause that needs the exact resume point
+    /// must read this instead.
+    var livePlayhead: Int {
+        guard isPlaying, let start = playStartDate else { return playheadFrame }
+        let elapsed = max(0, Int(Date().timeIntervalSince(start) * clipSampleRate))
+        let played = isLooping ? elapsed % max(1, scheduledFrames) : min(elapsed, scheduledFrames)
+        return rangeStart + played
+    }
+
     init() { engine.attach(node) }
 
     /// Plays `range` of `clip` (whole clip when nil). `looping` reschedules the same buffer seamlessly.
@@ -134,10 +145,9 @@ final class AudioEditorPlayer {
     private func tick() {
         guard isPlaying, let start = playStartDate else { return }
         let elapsed = max(0, Int(Date().timeIntervalSince(start) * clipSampleRate))
-        // Wrap while looping; otherwise clamp so a tick at the boundary can't snap the
-        // playhead back to the range start before `bufferFinished` lands.
-        let played = isLooping ? elapsed % max(1, scheduledFrames) : min(elapsed, scheduledFrames)
-        playheadFrame = rangeStart + played
+        // `livePlayhead` wraps while looping and clamps to the range end otherwise, so a
+        // tick at the boundary can't snap the playhead back before `bufferFinished` lands.
+        playheadFrame = livePlayhead
         // End on the .dataPlayedBack callback, which tracks real audio. Only fall back to the
         // wall clock well past the end (a quarter second), so this can't pre-empt playback
         // that is still sounding and desync play/pause.
