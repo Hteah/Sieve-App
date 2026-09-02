@@ -39,6 +39,13 @@ final class BookmarkStore: Sendable {
         (try? url.checkResourceIsReachable()) ?? false
     }
 
+    /// `isReachable`, but fenced by `timeout` and run off the caller's executor — `checkResourceIsReachable`
+    /// can block for a minute on a stalled SMB mount, and we must not hang the scan actor on it.
+    /// A timeout counts as not reachable; the blocking probe is abandoned (it unwinds when the mount does).
+    static func isReachable(_ url: URL, timeout: Duration) async -> Bool {
+        await firstResult(within: timeout) { withSecurityScope(url) { isReachable(url) } } ?? false
+    }
+
     // Remembered destination folder for "Move to…" (bookmark stored in UserDefaults).
     private static let moveDestinationKey = "moveDestinationBookmark"
 
@@ -119,4 +126,36 @@ func withSecurityScope<T>(_ url: URL, _ body: () async throws -> T) async rethro
     let ok = url.startAccessingSecurityScopedResource()
     defer { if ok { url.stopAccessingSecurityScopedResource() } }
     return try await body()
+}
+
+/// Runs `operation` on a detached task and returns its result, or `nil` if `timeout` elapses first.
+/// After a timeout the operation is left running (a task group would force us to await it) — use this
+/// to fence a synchronous call that can otherwise block indefinitely, e.g. a hung network mount, at
+/// the cost of parking one pool thread until that call finally returns.
+func firstResult<T: Sendable>(within timeout: Duration,
+                              of operation: @escaping @Sendable () -> T) async -> T? {
+    let gate = FirstResultGate()
+    return await withCheckedContinuation { (cont: CheckedContinuation<T?, Never>) in
+        Task.detached {
+            let value = operation()
+            gate.settle { cont.resume(returning: value) }
+        }
+        Task {
+            try? await Task.sleep(for: timeout)
+            gate.settle { cont.resume(returning: nil) }
+        }
+    }
+}
+
+/// Lets exactly one of two racing tasks resume a continuation.
+private final class FirstResultGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var settled = false
+    func settle(_ resume: () -> Void) {
+        lock.lock()
+        let firstToArrive = !settled
+        settled = true
+        lock.unlock()
+        if firstToArrive { resume() }
+    }
 }

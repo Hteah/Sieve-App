@@ -44,6 +44,10 @@ actor ScanCoordinator {
 
     var extensions: Set<String> = Set(Queries.audioExtensions)
 
+    /// How long to wait on a root's volume before calling it unreachable (a stalled SMB mount can
+    /// otherwise block for far longer). A mount notification or a manual Rescan retries.
+    static let reachabilityTimeout: Duration = .seconds(10)
+
     init(database: AppDatabase, bookmarks: BookmarkStore) {
         self.database = database
         self.bookmarks = bookmarks
@@ -155,9 +159,12 @@ actor ScanCoordinator {
         guard let roots = try? await database.reader.read({ db in try Root.fetchAll(db) }) else { return }
         for root in roots {
             guard let id = root.id else { continue }
-            let reachable = (try? bookmarks.resolve(root.bookmarkData)).map { r in
-                withSecurityScope(r.url) { BookmarkStore.isReachable(r.url) }
-            } ?? false
+            let reachable: Bool
+            if let r = try? bookmarks.resolve(root.bookmarkData) {
+                reachable = await BookmarkStore.isReachable(r.url, timeout: Self.reachabilityTimeout)
+            } else {
+                reachable = false
+            }
             if reachable != root.isAvailable {
                 if reachable {
                     scan(rootId: id)
@@ -208,7 +215,7 @@ actor ScanCoordinator {
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
 
-        guard BookmarkStore.isReachable(url) else {
+        guard await BookmarkStore.isReachable(url, timeout: Self.reachabilityTimeout) else {
             try await markUnavailable(rootId: rootId)
             throw ScanError.unavailable(url.path)
         }
