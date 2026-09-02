@@ -2,6 +2,7 @@ import SwiftUI
 
 struct SidebarView: View {
     @Environment(AppEnvironment.self) private var env
+    @Environment(\.palette) private var palette
     @Bindable var model: LibraryViewModel
     @AppStorage(QuickTags.storageKey) private var quickTagSlotsJSON = ""
     @State private var rootToRemove: Root?
@@ -112,6 +113,7 @@ struct SidebarView: View {
             }
         }
         .listStyle(.sidebar)
+        .themedSurface(palette)
         .alert("Rename Quick Tag", isPresented: Binding(get: { quickTagRenameSlot != nil }, set: { if !$0 { quickTagRenameSlot = nil } })) {
             TextField("Name", text: $quickTagNameDraft)
             Button("Cancel", role: .cancel) { quickTagRenameSlot = nil }

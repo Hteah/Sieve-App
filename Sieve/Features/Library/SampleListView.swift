@@ -5,6 +5,7 @@ import UniformTypeIdentifiers
 struct SampleListView: View {
     @Environment(AppEnvironment.self) private var env
     @Environment(\.openWindow) private var openWindow
+    @Environment(\.palette) private var palette
     @Bindable var model: LibraryViewModel
     /// Set by `ContentView` while a sidebar/inspector toggle animates: recalc columns only once
     /// the width settles. A manual divider drag / window resize leaves this false and updates live.
@@ -44,7 +45,8 @@ struct SampleListView: View {
     var body: some View {
         VStack(spacing: 0) {
             FilterBar(model: model)
-            Divider()
+                .themedChrome(palette)
+            Rectangle().fill(palette.divider).frame(height: 1)
             Table(model.rows, selection: $model.selection, sortOrder: sortComparators,
                   columnCustomization: $columnCustomization) {
                 TableColumn("Waveform") { row in
@@ -127,6 +129,9 @@ struct SampleListView: View {
                 }
                 .width(min: 64, ideal: 80).customizationID("size")
             }
+            // SwiftUI's Table can't recolour the every-other-row stripe, only toggle it — so it
+            // is turned off and every row shows `surface`.
+            .alternatingRowBackgrounds(.disabled)
             // Re-sorting reshuffles nearly every row; diffing 800+ scrambled rows is what
             // stalled the UI. Keying the table to the sort makes SwiftUI rebuild it once
             // (rendering only the visible rows) instead. Cost: scroll jumps to the top.
@@ -235,9 +240,12 @@ struct SampleListView: View {
             .sheet(item: $convertRequest) { req in
                 BatchConvertSheet(model: model, rows: req.rows)
             }
-            Divider()
+            .themedSurface(palette)
+            Rectangle().fill(palette.divider).frame(height: 1)
             statusBar
+                .themedChrome(palette)
         }
+        .background(palette.surface)
     }
 
     /// Changes only when the sort field or direction changes, so the table rebuilds then and

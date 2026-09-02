@@ -1,21 +1,27 @@
 import SwiftUI
 
 struct InspectorView: View {
+    @Environment(\.palette) private var palette
     @Bindable var model: LibraryViewModel
 
     var body: some View {
-        if let row = model.primarySelection {
-            SampleInspector(row: row, selectionCount: model.selection.count, selectedRows: model.selectedRows)
-                .id(row.id)
-        } else {
-            ContentUnavailableView("No Selection", systemImage: "waveform",
-                                   description: Text("Select a sample to see details."))
+        Group {
+            if let row = model.primarySelection {
+                SampleInspector(row: row, selectionCount: model.selection.count, selectedRows: model.selectedRows)
+                    .id(row.id)
+            } else {
+                ContentUnavailableView("No Selection", systemImage: "waveform",
+                                       description: Text("Select a sample to see details."))
+            }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(palette.surface)
     }
 }
 
 struct SampleInspector: View {
     @Environment(AppEnvironment.self) private var env
+    @Environment(\.palette) private var palette
     let row: SampleRow
     let selectionCount: Int
     let selectedRows: [SampleRow]
@@ -48,6 +54,7 @@ struct SampleInspector: View {
             }
             .padding(14)
         }
+        .themedSurface(palette)
         .task(id: row.id) { await load() }
     }
 

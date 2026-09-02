@@ -1,143 +1,118 @@
+import AppKit
 import SwiftUI
 
-/// User-selectable accent colour. `.system` = follow the macOS accent (no tint override).
-enum AppTheme: String, CaseIterable, Identifiable {
-    // Standard
-    case system, blue, indigo, purple, pink, red, orange, green, teal, grey, graphite, industrial
-    // Vintage computing
-    case amber, phosphor, cgaCyan, cgaMagenta, commodore, gameBoy, plasma, dosBeige, vaporPink
+// MARK: - Palette
 
-    var id: String { rawValue }
+/// The app's colour scheme: four user-chosen colours that `Themed` injects into the environment
+/// for the chrome-painting views. `scheme` (light/dark text) is derived from `surface`'s
+/// luminance so text always contrasts.
+struct Palette: Equatable {
+    var surface: Color   // list / sidebar / inspector background (every row — stripe is turned off)
+    var chrome: Color    // window toolbar + pane-button bar
+    var divider: Color   // hairlines
+    var accent: Color    // buttons, selection, waveform
+    var scheme: ColorScheme
+}
 
-    var isVintage: Bool {
-        switch self {
-        case .amber, .phosphor, .cgaCyan, .cgaMagenta, .commodore, .gameBoy, .plasma, .dosBeige, .vaporPink:
-            true
-        default:
-            false
-        }
+/// Reads / writes the custom-palette preferences and turns them into a `Palette`.
+enum CustomPalette {
+    static let surfaceKey = "customSurfaceHex"
+    static let chromeKey  = "customChromeHex"
+    static let dividerKey  = "customDividerHex"
+    static let accentKey  = "customAccentHex"
+
+    /// Dark-slate defaults (also the "Reset colours" target).
+    static let defaults: [String: String] = [
+        surfaceKey: "#37474F", chromeKey: "#293238", dividerKey: "#2C3A42", accentKey: "#F5B854",
+    ]
+
+    static func palette(surface: String, chrome: String, divider: String, accent: String) -> Palette {
+        let s = color(surface) ?? color(defaults[surfaceKey]!)!
+        return Palette(
+            surface: s,
+            chrome:  color(chrome)  ?? color(defaults[chromeKey]!)!,
+            divider: color(divider) ?? color(defaults[dividerKey]!)!,
+            accent:  color(accent)  ?? color(defaults[accentKey]!)!,
+            scheme:  luminance(s) < 0.5 ? .dark : .light
+        )
     }
 
-    var label: String {
-        switch self {
-        case .system: "System"
-        case .blue: "Blue"
-        case .indigo: "Indigo"
-        case .purple: "Purple"
-        case .pink: "Pink"
-        case .red: "Red"
-        case .orange: "Orange"
-        case .green: "Green"
-        case .teal: "Teal"
-        case .grey: "Grey"
-        case .graphite: "Graphite"
-        case .industrial: "Industrial Grey"
-        case .amber: "Amber CRT"
-        case .phosphor: "Phosphor Green"
-        case .cgaCyan: "CGA Cyan"
-        case .cgaMagenta: "CGA Magenta"
-        case .commodore: "Commodore Blue"
-        case .gameBoy: "Game Boy"
-        case .plasma: "Plasma Orange"
-        case .dosBeige: "DOS Beige"
-        case .vaporPink: "Vapor Pink"
-        }
+    static func color(_ hex: String) -> Color? {
+        let t = hex.trimmingCharacters(in: CharacterSet(charactersIn: " #")).uppercased()
+        guard t.count == 6, let v = Int(t, radix: 16) else { return nil }
+        return Color(.sRGB, red: Double((v >> 16) & 0xFF) / 255,
+                     green: Double((v >> 8) & 0xFF) / 255,
+                     blue: Double(v & 0xFF) / 255, opacity: 1)
     }
 
-    /// Tint colour, or `nil` to leave the system accent alone.
-    var accent: Color? {
-        switch self {
-        case .system: nil
-        case .blue: .blue
-        case .indigo: .indigo
-        case .purple: .purple
-        case .pink: .pink
-        case .red: .red
-        case .orange: .orange
-        case .green: .green
-        case .teal: .teal
-        case .grey: Color(white: 0.62)          // neutral mid grey
-        case .graphite: Color(white: 0.55)
-        case .industrial: Self.rgb(90, 96, 104)   // cool gunmetal
-        case .amber: Self.rgb(255, 176, 0)
-        case .phosphor: Self.rgb(45, 255, 90)
-        case .cgaCyan: Self.rgb(85, 255, 255)
-        case .cgaMagenta: Self.rgb(255, 85, 255)
-        case .commodore: Self.rgb(124, 124, 255)
-        case .gameBoy: Self.rgb(139, 172, 15)
-        case .plasma: Self.rgb(255, 106, 0)
-        case .dosBeige: Self.rgb(194, 178, 128)
-        case .vaporPink: Self.rgb(255, 110, 199)
-        }
+    static func hex(_ color: Color) -> String {
+        let ns = NSColor(color).usingColorSpace(.sRGB) ?? .white
+        return String(format: "#%02X%02X%02X",
+                      Int((ns.redComponent * 255).rounded()),
+                      Int((ns.greenComponent * 255).rounded()),
+                      Int((ns.blueComponent * 255).rounded()))
     }
 
-    /// Colour to draw waveforms with (falls back to the live accent for `.system`).
-    var waveformColor: Color { accent ?? .accentColor }
+    private static func luminance(_ color: Color) -> Double {
+        let ns = NSColor(color).usingColorSpace(.sRGB) ?? .black
+        return 0.299 * ns.redComponent + 0.587 * ns.greenComponent + 0.114 * ns.blueComponent
+    }
 
-    static func current(_ raw: String) -> AppTheme { AppTheme(rawValue: raw) ?? .system }
+    /// Named starting points for the "Start from…" menu — (label, surface, chrome, divider, accent).
+    static let presets: [(name: String, surface: String, chrome: String, divider: String, accent: String)] = [
+        ("Ableton Dark Blue-Grey", "#37474F", "#293238", "#2C3A42", "#F5B854"),
+        ("Charcoal",               "#434343", "#2E2E2E", "#363636", "#F5B854"),
+        ("Neutral Grey",           "#616161", "#3A3A3A", "#4E4E4E", "#F5B854"),
+        ("Slate Blue",             "#2E3440", "#21252E", "#262B36", "#88C0D0"),
+        ("Warm Graphite",          "#3A3736", "#262322", "#302C2B", "#E0A24E"),
+    ]
 
-    private static func rgb(_ r: Double, _ g: Double, _ b: Double) -> Color {
-        Color(.sRGB, red: r / 255, green: g / 255, blue: b / 255, opacity: 1)
+    static var defaultPalette: Palette {
+        palette(surface: defaults[surfaceKey]!, chrome: defaults[chromeKey]!,
+                divider: defaults[dividerKey]!, accent: defaults[accentKey]!)
     }
 }
 
-enum AppAppearance: String, CaseIterable, Identifiable {
-    case system, light, dark, grey, industrial
-
-    var id: String { rawValue }
-    var label: String {
-        switch self {
-        case .system: "System"
-        case .light: "Light"
-        case .dark: "Dark"
-        case .grey: "Grey"
-        case .industrial: "Industrial Grey"
-        }
-    }
-    var colorScheme: ColorScheme? {
-        switch self {
-        case .system: nil
-        case .light, .grey: .light
-        case .dark, .industrial: .dark
-        }
-    }
-
-    /// A screen-wide colour wash layered over the base scheme (nil = none). `blend` is how it
-    /// combines: `.plusLighter` lifts a dark base toward the tint, `.multiply` takes a light
-    /// base down toward it.
-    var wash: (color: Color, opacity: Double, blend: BlendMode)? {
-        switch self {
-        case .grey: (Color(.sRGB, red: 0.58, green: 0.61, blue: 0.66, opacity: 1), 0.70, .multiply)   // cool light-grey paper
-        case .industrial: (Color(.sRGB, red: 0.36, green: 0.38, blue: 0.42, opacity: 1), 0.22, .plusLighter)
-        default: nil
-        }
+private struct PaletteKey: EnvironmentKey {
+    static let defaultValue = CustomPalette.defaultPalette
+}
+extension EnvironmentValues {
+    /// The app's colour palette, set by `Themed`.
+    var palette: Palette {
+        get { self[PaletteKey.self] }
+        set { self[PaletteKey.self] = newValue }
     }
 }
 
-/// Applies the stored accent theme, appearance, and screen-dim level to a scene's root view.
+extension View {
+    /// Paints `palette.surface` behind a scrollable container (List / Table / ScrollView).
+    func themedSurface(_ palette: Palette) -> some View {
+        scrollContentBackground(.hidden).background(palette.surface)
+    }
+    /// Paints `palette.chrome` behind a bar (toolbar strip, pane-button bar).
+    func themedChrome(_ palette: Palette) -> some View {
+        background(palette.chrome)
+    }
+}
+
+/// Injects the colour palette and screen-dim level into a scene's root view.
 struct Themed: ViewModifier {
-    @AppStorage("appTheme") private var themeRaw = AppTheme.system.rawValue
-    @AppStorage("appAppearance") private var appearanceRaw = AppAppearance.system.rawValue
     @AppStorage("appBrightness") private var brightness = 0.0   // -1 (dim) … +1 (bright)
+    @AppStorage(CustomPalette.surfaceKey) private var customSurface = CustomPalette.defaults[CustomPalette.surfaceKey]!
+    @AppStorage(CustomPalette.chromeKey) private var customChrome = CustomPalette.defaults[CustomPalette.chromeKey]!
+    @AppStorage(CustomPalette.dividerKey) private var customDivider = CustomPalette.defaults[CustomPalette.dividerKey]!
+    @AppStorage(CustomPalette.accentKey) private var customAccent = CustomPalette.defaults[CustomPalette.accentKey]!
 
     func body(content: Content) -> some View {
-        let theme = AppTheme.current(themeRaw)
-        let appearance = AppAppearance(rawValue: appearanceRaw) ?? .system
+        let palette = CustomPalette.palette(surface: customSurface, chrome: customChrome,
+                                            divider: customDivider, accent: customAccent)
         content
-            .tint(theme.accent)   // nil = no override
-            .preferredColorScheme(appearance.colorScheme)
-            // Washes are overlays, not `.brightness()` filters — a filter on the whole window
+            .environment(\.palette, palette)
+            .tint(palette.accent)
+            .preferredColorScheme(palette.scheme)
+            .background(palette.surface.ignoresSafeArea())
+            // A dim/brighten overlay, not a `.brightness()` filter — a filter on the whole window
             // breaks the NavigationSplitView + toolbar safe-area layout.
-            .overlay {
-                if let wash = appearance.wash {
-                    Rectangle()
-                        .fill(wash.color)
-                        .opacity(wash.opacity)
-                        .blendMode(wash.blend)
-                        .allowsHitTesting(false)
-                        .ignoresSafeArea()
-                }
-            }
             .overlay {
                 if brightness != 0 {
                     Rectangle()
@@ -150,3 +125,4 @@ struct Themed: ViewModifier {
             }
     }
 }
+

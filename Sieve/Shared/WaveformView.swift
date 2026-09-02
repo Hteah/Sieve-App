@@ -7,8 +7,8 @@ struct WaveformView: View {
     var showGrid: Bool = false
     var onSeek: ((Double) -> Void)? = nil
 
-    @AppStorage("appTheme") private var themeRaw = AppTheme.system.rawValue
-    private var accent: Color { AppTheme.current(themeRaw).waveformColor }
+    @Environment(\.palette) private var palette
+    private var accent: Color { palette.accent }
 
     var body: some View {
         Canvas(rendersAsynchronously: true) { ctx, size in

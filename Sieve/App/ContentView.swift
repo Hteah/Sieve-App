@@ -3,6 +3,7 @@ import SwiftUI
 struct ContentView: View {
     @Environment(AppEnvironment.self) private var env
     @Environment(\.openWindow) private var openWindow
+    @Environment(\.palette) private var palette
     @State private var model: LibraryViewModel?
     // Source of truth is @State: an @AppStorage binding handed to `.inspector`
     // lags a frame, so the first toggle click can read back stale. Persisted on change.
@@ -26,6 +27,8 @@ struct ContentView: View {
                 splitView(model)
                     .navigationSplitViewStyle(.balanced)
                     .environment(controlHint)
+                    .toolbarBackground(palette.chrome, for: .windowToolbar)
+                    .toolbarBackgroundVisibility(.visible, for: .windowToolbar)
                     .safeAreaInset(edge: .bottom, spacing: 0) { hintStrip }
                     .toolbar {
                         ToolbarItemGroup(placement: .primaryAction) {
@@ -139,8 +142,8 @@ struct ContentView: View {
         .font(.system(size: 15))
         .padding(.horizontal, 8)
         .padding(.vertical, 5)
-        .background(.bar)
-        .overlay(alignment: .bottom) { Divider() }
+        .themedChrome(palette)
+        .overlay(alignment: .bottom) { Rectangle().fill(palette.divider).frame(height: 1) }
     }
 
     /// Bottom-edge strip that echoes the hovered control's description while
@@ -159,8 +162,8 @@ struct ContentView: View {
             .padding(.horizontal, 10)
             .frame(height: 20)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(.bar)
-            .overlay(alignment: .top) { Divider() }
+            .themedChrome(palette)
+            .overlay(alignment: .top) { Rectangle().fill(palette.divider).frame(height: 1) }
         }
     }
 

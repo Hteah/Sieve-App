@@ -4,6 +4,7 @@ import SwiftUI
 
 struct DuplicateGroupsView: View {
     @Environment(AppEnvironment.self) private var env
+    @Environment(\.palette) private var palette
     @Bindable var model: LibraryViewModel
 
     @State private var groups: [DuplicateGroup] = []
@@ -40,8 +41,11 @@ struct DuplicateGroupsView: View {
                     }
                 }
                 .listStyle(.inset)
+                .themedSurface(palette)
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(palette.surface)
         .task { await observe() }
         .sheet(item: $pending) { p in confirmSheet(p) }
         .sheet(isPresented: Binding(get: { results != nil }, set: { if !$0 { results = nil } })) { resultsSheet }

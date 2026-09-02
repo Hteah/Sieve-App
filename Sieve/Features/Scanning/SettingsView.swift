@@ -7,9 +7,11 @@ struct SettingsView: View {
     @AppStorage("previewVolume") private var previewVolume = 1.0
     @AppStorage("editorNormalizeDb") private var normalizeDb = -1.0
     @AppStorage("editorMaxMinutes") private var editorMaxMinutes = 10
-    @AppStorage("appTheme") private var themeRaw = AppTheme.system.rawValue
-    @AppStorage("appAppearance") private var appearanceRaw = AppAppearance.system.rawValue
     @AppStorage("appBrightness") private var brightness = 0.0
+    @AppStorage(CustomPalette.surfaceKey) private var customSurface = CustomPalette.defaults[CustomPalette.surfaceKey]!
+    @AppStorage(CustomPalette.chromeKey) private var customChrome = CustomPalette.defaults[CustomPalette.chromeKey]!
+    @AppStorage(CustomPalette.dividerKey) private var customDivider = CustomPalette.defaults[CustomPalette.dividerKey]!
+    @AppStorage(CustomPalette.accentKey) private var customAccent = CustomPalette.defaults[CustomPalette.accentKey]!
     @AppStorage(QuickTags.storageKey) private var quickTagSlotsJSON = ""
     @Environment(AppEnvironment.self) private var env
     @State private var recordingsFolder: URL?
@@ -19,13 +21,32 @@ struct SettingsView: View {
 
     var body: some View {
         Form {
-            Picker("Accent color", selection: $themeRaw) {
-                Section("Standard") { themeRows(AppTheme.allCases.filter { !$0.isVintage }) }
-                Section("Vintage") { themeRows(AppTheme.allCases.filter(\.isVintage)) }
+            LabeledContent("Colours") {
+                HStack(spacing: 8) {
+                    Menu("Start from…") {
+                        ForEach(CustomPalette.presets, id: \.name) { p in
+                            Button(p.name) {
+                                customSurface = p.surface; customChrome = p.chrome
+                                customDivider = p.divider; customAccent = p.accent
+                            }
+                        }
+                    }
+                    .frame(width: 130)
+                    Button("Reset") {
+                        customSurface = CustomPalette.defaults[CustomPalette.surfaceKey]!
+                        customChrome = CustomPalette.defaults[CustomPalette.chromeKey]!
+                        customDivider = CustomPalette.defaults[CustomPalette.dividerKey]!
+                        customAccent = CustomPalette.defaults[CustomPalette.accentKey]!
+                    }
+                    .controlSize(.small)
+                }
             }
-            Picker("Appearance", selection: $appearanceRaw) {
-                ForEach(AppAppearance.allCases) { Text($0.label).tag($0.rawValue) }
-            }
+            ColorPicker("Surface", selection: paletteBinding($customSurface), supportsOpacity: false)
+            ColorPicker("Chrome (bars)", selection: paletteBinding($customChrome), supportsOpacity: false)
+            ColorPicker("Divider", selection: paletteBinding($customDivider), supportsOpacity: false)
+            ColorPicker("Accent", selection: paletteBinding($customAccent), supportsOpacity: false)
+            Text("Surface fills the whole list, sidebar and inspector — the every-other-row stripe is turned off (SwiftUI can't recolour it). Light/dark text follows the Surface colour.")
+                .font(.caption).foregroundStyle(.secondary)
             LabeledContent("Brightness") {
                 HStack(spacing: 6) {
                     Image(systemName: "moon.fill").font(.caption2).foregroundStyle(.secondary)
@@ -178,15 +199,12 @@ struct SettingsView: View {
         )
     }
 
-    @ViewBuilder
-    private func themeRows(_ themes: [AppTheme]) -> some View {
-        ForEach(themes) { theme in
-            HStack {
-                Circle().fill(theme.accent ?? .accentColor).frame(width: 10, height: 10)
-                Text(theme.label)
-            }
-            .tag(theme.rawValue)
-        }
+    /// Bridges a stored `#RRGGBB` string to a `ColorPicker`'s `Binding<Color>`.
+    private func paletteBinding(_ hex: Binding<String>) -> Binding<Color> {
+        Binding(
+            get: { CustomPalette.color(hex.wrappedValue) ?? .gray },
+            set: { hex.wrappedValue = CustomPalette.hex($0) }
+        )
     }
 
     private func chooseRecordingsFolder() {

@@ -5,12 +5,9 @@ struct SieveApp: App {
     @State private var env = AppEnvironment.live()
 
     init() {
-        // First-launch look: Amber CRT accent over Industrial Grey, a touch brighter, with
-        // the inspector collapsed. `register` only fills keys the user hasn't set, so this
-        // never overrides a later choice.
+        // First-launch: a touch brighter, inspector collapsed. The colour palette has its own
+        // defaults (see `CustomPalette.defaults`). `register` only fills keys the user hasn't set.
         UserDefaults.standard.register(defaults: [
-            "appTheme": AppTheme.amber.rawValue,
-            "appAppearance": AppAppearance.industrial.rawValue,
             "appBrightness": 0.47,
             "showInspector": false,
         ])

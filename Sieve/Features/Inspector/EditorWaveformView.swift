@@ -26,8 +26,8 @@ struct EditorWaveformView: View {
     /// Bind ⌘+ / ⌘- / ⌘0 to zoom in / out / fit (pop-out editor only).
     var keyboardZoomEnabled = false
 
-    @AppStorage("appTheme") private var themeRaw = AppTheme.system.rawValue
-    private var accent: Color { AppTheme.current(themeRaw).waveformColor }
+    @Environment(\.palette) private var palette
+    private var accent: Color { palette.accent }
 
     @State private var visibleStart = 0
     @State private var visibleFrames = 0          // 0 => whole clip
