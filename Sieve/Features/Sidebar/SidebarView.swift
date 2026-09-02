@@ -183,6 +183,7 @@ struct SidebarView: View {
             Button("Reveal in Finder") {
                 if let url = env.rootURL(for: id) { withSecurityScope(url) { NSWorkspace.shared.activateFileViewerSelecting([url]) } }
             }
+            Button("Relink…") { Task { await env.relinkRootViaPanel(rootId: id) } }
             Divider()
             Menu("Move to Group") {
                 ForEach(model.groups) { group in

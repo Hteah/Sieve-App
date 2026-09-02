@@ -17,6 +17,40 @@ extension AppEnvironment {
         }
     }
 
+    /// Prompts for a new location for an existing root (folder moved / drive reformatted) and relinks it,
+    /// preserving the root's samples, analysis, group and ordering. Kicks a rescan on success.
+    func relinkRootViaPanel(rootId: Int64) async {
+        guard let root = try? await database.reader.read({ db in try Root.fetchOne(db, key: rootId) }) else { return }
+
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Relink"
+        panel.message = "Choose the new location of \u{201C}\(root.name)\u{201D}."
+        let oldParent = URL(fileURLWithPath: root.lastResolvedPath).deletingLastPathComponent()
+        panel.directoryURL = FileManager.default.fileExists(atPath: oldParent.path)
+            ? oldParent : URL(fileURLWithPath: "/Volumes", isDirectory: true)
+        guard panel.runModal() == .OK, let url = panel.urls.first else { return }
+
+        if url.lastPathComponent != root.name {
+            let alert = NSAlert()
+            alert.messageText = "Relink to a differently named folder?"
+            alert.informativeText = "This folder is named \u{201C}\(url.lastPathComponent)\u{201D}, "
+                + "but the library folder was \u{201C}\(root.name)\u{201D}. Relink anyway?"
+            alert.addButton(withTitle: "Relink")
+            alert.addButton(withTitle: "Cancel")
+            guard alert.runModal() == .alertFirstButtonReturn else { return }
+        }
+
+        do {
+            try await scanner.relinkRoot(id: rootId, to: url)
+            rootURLCache[rootId] = nil
+        } catch {
+            report(error)
+        }
+    }
+
     /// Resolves a root's bookmark to a URL (cached). Caller must hold security scope on it to read children.
     func rootURL(for rootId: Int64) -> URL? {
         if let cached = rootURLCache[rootId] { return cached }

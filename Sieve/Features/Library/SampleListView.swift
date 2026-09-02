@@ -338,14 +338,32 @@ struct SampleListView: View {
         }
     }
 
+    /// The root the list is scoped to, when that root is currently unavailable (volume unmounted / moved).
+    private var unavailableScopedRoot: Root? {
+        guard case .root(let id) = model.filter.scope, let root = model.root(for: id),
+              !root.isAvailable else { return nil }
+        return root
+    }
+
+    @ViewBuilder
     private var emptyState: some View {
-        ContentUnavailableView {
-            Label(model.roots.isEmpty ? "No Folders Yet" : "No Samples", systemImage: "waveform.slash")
-        } description: {
-            Text(model.roots.isEmpty ? "Add a folder of samples to start indexing." : "Nothing matches the current filter.")
-        } actions: {
-            if model.roots.isEmpty {
-                Button("Add Folder…") { Task { await env.addRootViaPanel() } }
+        if let root = unavailableScopedRoot, let id = root.id {
+            ContentUnavailableView {
+                Label("Volume Not Mounted", systemImage: "externaldrive.badge.questionmark")
+            } description: {
+                Text("Reconnect the drive, or relink \u{201C}\(root.name)\u{201D} to its new location.")
+            } actions: {
+                Button("Relink…") { Task { await env.relinkRootViaPanel(rootId: id) } }
+            }
+        } else {
+            ContentUnavailableView {
+                Label(model.roots.isEmpty ? "No Folders Yet" : "No Samples", systemImage: "waveform.slash")
+            } description: {
+                Text(model.roots.isEmpty ? "Add a folder of samples to start indexing." : "Nothing matches the current filter.")
+            } actions: {
+                if model.roots.isEmpty {
+                    Button("Add Folder…") { Task { await env.addRootViaPanel() } }
+                }
             }
         }
     }

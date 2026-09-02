@@ -91,6 +91,29 @@ actor ScanCoordinator {
         }
     }
 
+    /// Points an existing root at a new location (folder moved, drive reformatted) without losing the
+    /// row — so its samples, analysis, group membership and ordering survive. Mints a fresh bookmark for
+    /// `newURL` and kicks a scan; the scan reconciles `isAvailable` and per-file status.
+    func relinkRoot(id: Int64, to newURL: URL) async throws {
+        cancel(rootId: id)
+        let data = try withSecurityScope(newURL) { try bookmarks.makeBookmark(for: newURL) }
+        try await applyRelink(id: id, newURL: newURL, bookmarkData: data,
+                              volumeUUID: BookmarkStore.volumeUUID(of: newURL))
+        scan(rootId: id)
+    }
+
+    /// The DB half of a relink: swap the bookmark/path/volume, keep every identity and stats field.
+    /// Availability and per-sample status are left for the follow-up scan to set.
+    func applyRelink(id: Int64, newURL: URL, bookmarkData: Data, volumeUUID: String?) async throws {
+        try await database.writer.write { db in
+            guard var root = try Root.fetchOne(db, key: id) else { throw ScanError.rootNotFound }
+            root.bookmarkData = bookmarkData
+            root.lastResolvedPath = newURL.path
+            root.volumeUUID = volumeUUID
+            try root.update(db)
+        }
+    }
+
     func scanAll() async {
         let ids = (try? await database.reader.read { db in try Int64.fetchAll(db, sql: "SELECT id FROM root") }) ?? []
         for id in ids { scan(rootId: id) }
