@@ -11,6 +11,11 @@ struct ContentView: View {
     @State private var followTask: Task<Void, Never>?
     @State private var controlHint = ControlHint()
     @AppStorage("showControlInfo") private var showControlInfo = false
+    // True while a sidebar/inspector show-hide animation is in flight. The list debounces its
+    // responsive-column recalculation during this window so the animated width sweep doesn't
+    // stall on a Table re-layout; a manual divider drag leaves it false and updates live.
+    @State private var paneToggleActive = false
+    @State private var paneToggleResetTask: Task<Void, Never>?
 
     private var sidebarShown: Bool { columnVisibility != .detailOnly }
 
@@ -88,7 +93,7 @@ struct ContentView: View {
             if model.showsDuplicates {
                 DuplicateGroupsView(model: model)
             } else {
-                SampleListView(model: model)
+                SampleListView(model: model, paneToggleActive: paneToggleActive)
             }
         }
         .safeAreaInset(edge: .top, spacing: 0) { paneToggleBar }
@@ -151,12 +156,26 @@ struct ContentView: View {
     }
 
     private func toggleSidebar() {
+        markPaneToggle()
         withAnimation {
             columnVisibility = (columnVisibility == .detailOnly) ? .all : .detailOnly
         }
     }
 
     private func toggleInspector() {
+        markPaneToggle()
         withAnimation(.snappy(duration: 0.2)) { showInspector.toggle() }
+    }
+
+    /// Holds `paneToggleActive` for a beat past the slide so the list keeps debouncing its
+    /// column recalculation until the pane has fully settled.
+    private func markPaneToggle() {
+        paneToggleActive = true
+        paneToggleResetTask?.cancel()
+        paneToggleResetTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(450))
+            guard !Task.isCancelled else { return }
+            paneToggleActive = false
+        }
     }
 }
