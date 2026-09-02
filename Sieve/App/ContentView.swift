@@ -167,13 +167,13 @@ struct ContentView: View {
         withAnimation(.snappy(duration: 0.2)) { showInspector.toggle() }
     }
 
-    /// Holds `paneToggleActive` for a beat past the slide so the list keeps debouncing its
-    /// column recalculation until the pane has fully settled.
+    /// Holds `paneToggleActive` from the moment a toggle starts until safely past the end of its
+    /// slide, so the list defers its responsive-column recalculation until the pane has settled.
     private func markPaneToggle() {
         paneToggleActive = true
         paneToggleResetTask?.cancel()
         paneToggleResetTask = Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(450))
+            try? await Task.sleep(for: .milliseconds(550))
             guard !Task.isCancelled else { return }
             paneToggleActive = false
         }

@@ -12,7 +12,8 @@ struct SampleListView: View {
     @AppStorage("autoPreview") private var autoPreview = true
     @AppStorage(QuickTags.storageKey) private var quickTagSlotsJSON = ""
     @State private var columnCustomization = TableColumnCustomization<SampleRow>()
-    @State private var resizeSettleTask: Task<Void, Never>?
+    /// Latest list width seen while a pane toggle is animating; applied once the toggle settles.
+    @State private var deferredWidth: CGFloat?
     @State private var convertRequest: ConvertRequest?
     // A tap on a row's waveform runs a DragGesture inside the Table cell, which knocks
     // keyboard focus off the Table — so the next Space press lands nowhere (or in the
@@ -124,7 +125,20 @@ struct SampleListView: View {
             // (rendering only the visible rows) instead. Cost: scroll jumps to the top.
             .id(sortToken)
             .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width in
-                scheduleResponsiveColumns(width: width)
+                // During a sidebar/inspector toggle the list width animates across the responsive
+                // column thresholds; toggling `Table` column visibility mid-slide forces a
+                // re-layout that visibly stalls the animation (worst at narrow widths). Hold the
+                // width and apply it once the toggle settles; live for divider drags / resizes.
+                if paneToggleActive {
+                    deferredWidth = width
+                } else {
+                    applyResponsiveColumns(width: width)
+                }
+            }
+            .onChange(of: paneToggleActive) { _, active in
+                guard !active, let width = deferredWidth else { return }
+                deferredWidth = nil
+                applyResponsiveColumns(width: width)
             }
             .contextMenu(forSelectionType: Int64.self) { ids in
                 let rows = model.rows.filter { ids.contains($0.id) }
@@ -296,24 +310,9 @@ struct SampleListView: View {
                               filename: row.filename))
     }
 
-    /// `.onGeometryChange` fires every frame while a sidebar/inspector slide animates the list
-    /// width. Toggling `Table` column visibility forces a full re-layout, so doing it mid-slide
-    /// stalls the animation whenever the width sweeps past a threshold ("struggles to close" when
-    /// the pane has to cover list text). During a toggle, wait for the width to settle and apply
-    /// once; a manual divider drag / window resize has no such animation, so apply live.
-    private func scheduleResponsiveColumns(width: CGFloat) {
-        resizeSettleTask?.cancel()
-        guard paneToggleActive else {
-            applyResponsiveColumns(width: width)
-            return
-        }
-        resizeSettleTask = Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(90))
-            guard !Task.isCancelled else { return }
-            applyResponsiveColumns(width: width)
-        }
-    }
-
+    /// Shows/hides trailing `Table` columns for the current list width. Not called while a pane
+    /// toggle animates (see `.onGeometryChange` above) — a column-visibility change forces a full
+    /// table re-layout that would stall the slide.
     private func applyResponsiveColumns(width: CGFloat) {
         for column in Self.responsiveColumns {
             let wanted: Visibility = width >= column.minWidth ? .visible : .hidden
