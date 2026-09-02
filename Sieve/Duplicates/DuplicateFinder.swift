@@ -6,12 +6,6 @@ struct DuplicateGroup: Identifiable, Hashable, Sendable {
     var members: [SampleRow]
     var id: String { hash }
     var wastedBytes: Int64 { members.dropFirst().reduce(0) { $0 + $1.fileSize } }
-    /// Default keeper: shortest path, then lowest id (oldest in index).
-    var defaultKeeper: SampleRow? {
-        members.min { a, b in
-            a.relativePath.count != b.relativePath.count ? a.relativePath.count < b.relativePath.count : a.id < b.id
-        }
-    }
 }
 
 enum DuplicateFinder {

@@ -66,13 +66,13 @@ struct FileOperatorTests {
         try await db.reader.read { try DuplicateFinder.groups(db: $0) }
     }
 
-    @Test func findsGroupsAndPicksShortestPathKeeper() async throws {
+    @Test func findsGroupsOfIdenticalAudio() async throws {
         let w = try await makeWorld()
         let g = try await groups(w.db)
         #expect(g.count == 1)
         #expect(g[0].members.count == 2)
+        #expect(Set(g[0].members.map(\.relativePath)) == ["A/kick.wav", "B/kick.wav"])
         #expect(g[0].wastedBytes == g[0].members[1].fileSize)
-        #expect(g[0].defaultKeeper?.relativePath == "A/kick.wav")
     }
 
     @Test func trashMarksMissingAndLogs() async throws {

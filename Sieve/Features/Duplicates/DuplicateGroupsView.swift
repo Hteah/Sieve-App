@@ -57,7 +57,12 @@ struct DuplicateGroupsView: View {
         HStack {
             VStack(alignment: .leading) {
                 Text("\(groups.count) duplicate group\(groups.count == 1 ? "" : "s")").font(.headline)
-                Text("\(Fmt.bytes(totalWasted)) in redundant copies").font(.caption).foregroundStyle(.secondary)
+                if everyGroupHasKeeper || groups.isEmpty {
+                    Text("\(Fmt.bytes(totalWasted)) in redundant copies").font(.caption).foregroundStyle(.secondary)
+                } else {
+                    Text("\(groupsNeedingKeeper) group\(groupsNeedingKeeper == 1 ? "" : "s") need a copy picked to keep")
+                        .font(.caption).foregroundStyle(.orange)
+                }
             }
             Spacer()
             Button("Recent Operations…") { showLog = true }.controlSize(.small)
@@ -66,17 +71,24 @@ struct DuplicateGroupsView: View {
                 Button("Move All Redundant Copies To…") { chooseDestination { stage(.move(destination: $0), samples: allRedundant()) } }
             }
             .frame(width: 120)
-            .disabled(groups.isEmpty)
+            .disabled(!everyGroupHasKeeper)
+            .help(everyGroupHasKeeper ? "" : "Pick a copy to keep in every group first")
         }
         .padding(10)
     }
 
     private func groupHeader(_ group: DuplicateGroup) -> some View {
-        HStack {
+        let hasKeeper = keeper(for: group) != nil
+        return HStack {
             Text("\(group.members.count) copies · \(Fmt.duration(group.members.first?.durationSec)) · \(Fmt.bytes(group.wastedBytes)) redundant")
             Spacer()
+            if !hasKeeper {
+                Text("Pick a copy to keep").font(.caption).foregroundStyle(.orange)
+            }
             Button("Trash Redundant") { stage(.trash, samples: redundant(in: group)) }
+                .disabled(!hasKeeper)
             Button("Move Redundant To…") { chooseDestination { stage(.move(destination: $0), samples: redundant(in: group)) } }
+                .disabled(!hasKeeper)
         }
         .controlSize(.small)
         .textCase(nil)
@@ -94,7 +106,8 @@ struct DuplicateGroupsView: View {
                     .foregroundStyle(member.id == keeperId ? Color.accentColor : Color.secondary)
             }
             .buttonStyle(.plain)
-            .help(member.id == keeperId ? "This copy is kept" : "Keep this copy instead")
+            .help(member.id == keeperId ? "This copy is kept"
+                  : (keeperId == nil ? "Keep this copy" : "Keep this copy instead"))
             WaveformView(summary: member.waveform.flatMap(WaveformSummary.init(encoded:)))
                 .frame(width: 90, height: 24)
             VStack(alignment: .leading, spacing: 1) {
@@ -104,7 +117,7 @@ struct DuplicateGroupsView: View {
             Spacer()
             if !available { Image(systemName: "exclamationmark.triangle").foregroundStyle(.orange).help("Volume not mounted") }
             Text(member.modifiedAt.formatted(date: .abbreviated, time: .omitted)).font(.caption).foregroundStyle(.secondary)
-            Text(member.id == keeperId ? "Keep" : "Redundant").font(.caption)
+            Text(keeperId == nil ? "" : (member.id == keeperId ? "Keep" : "Redundant")).font(.caption)
                 .foregroundStyle(member.id == keeperId ? Color.accentColor : Color.secondary)
                 .frame(width: 70, alignment: .trailing)
         }
@@ -121,17 +134,22 @@ struct DuplicateGroupsView: View {
 
     // MARK: Keep logic
 
+    /// The copy the user has ticked to keep, or nil — there is no automatic guess, every group's
+    /// keeper is an explicit choice before anything can be trashed or moved.
     private func keeper(for group: DuplicateGroup) -> Int64? {
-        if let k = keepers[group.hash], group.members.contains(where: { $0.id == k }) { return k }
-        return group.defaultKeeper?.id
+        guard let k = keepers[group.hash], group.members.contains(where: { $0.id == k }) else { return nil }
+        return k
     }
 
     private func redundant(in group: DuplicateGroup) -> [SampleRow] {
-        let k = keeper(for: group)
+        guard let k = keeper(for: group) else { return [] }
         return group.members.filter { $0.id != k && (model.root(for: $0.rootId)?.isAvailable ?? false) }
     }
 
     private func allRedundant() -> [SampleRow] { groups.flatMap(redundant(in:)) }
+
+    private var groupsNeedingKeeper: Int { groups.filter { keeper(for: $0) == nil }.count }
+    private var everyGroupHasKeeper: Bool { !groups.isEmpty && groupsNeedingKeeper == 0 }
 
     // MARK: Ops
 
