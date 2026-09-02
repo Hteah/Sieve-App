@@ -440,6 +440,7 @@ struct WaveformCell: View {
 }
 
 struct FilterBar: View {
+    @Environment(\.palette) private var palette
     @Bindable var model: LibraryViewModel
 
     var body: some View {
@@ -466,8 +467,13 @@ struct FilterBar: View {
     }
 
     @ViewBuilder private var controls: some View {
+        // Plain field painted from the palette — `.roundedBorder` draws an AppKit fill that
+        // can't be recoloured, so the search box would ignore the theme.
         TextField("Search names and paths", text: $model.searchText)
-            .textFieldStyle(.roundedBorder)
+            .textFieldStyle(.plain)
+            .padding(.horizontal, 7).padding(.vertical, 4)
+            .background(palette.surface, in: RoundedRectangle(cornerRadius: 5))
+            .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(palette.divider, lineWidth: 1))
             .frame(minWidth: 90, idealWidth: 220, maxWidth: 320)
         Picker("Rating", selection: $model.filter.minRating) {
             Text("Any rating").tag(0)

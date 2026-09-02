@@ -41,11 +41,11 @@ struct SettingsView: View {
                     .controlSize(.small)
                 }
             }
-            ColorPicker("Surface", selection: paletteBinding($customSurface), supportsOpacity: false)
-            ColorPicker("Chrome (bars)", selection: paletteBinding($customChrome), supportsOpacity: false)
-            ColorPicker("Divider", selection: paletteBinding($customDivider), supportsOpacity: false)
-            ColorPicker("Accent", selection: paletteBinding($customAccent), supportsOpacity: false)
-            Text("Surface fills the whole list, sidebar and inspector — the every-other-row stripe is turned off (SwiftUI can't recolour it). Light/dark text follows the Surface colour.")
+            HexColorRow(label: "Surface", hex: $customSurface)
+            HexColorRow(label: "Chrome (bars)", hex: $customChrome)
+            HexColorRow(label: "Divider", hex: $customDivider)
+            HexColorRow(label: "Accent", hex: $customAccent)
+            Text("Type or paste a #RRGGBB value, or use the well. Surface fills the whole list, sidebar and inspector — the every-other-row stripe is turned off (SwiftUI can't recolour it). Light/dark text follows the Surface colour.")
                 .font(.caption).foregroundStyle(.secondary)
             LabeledContent("Brightness") {
                 HStack(spacing: 6) {
@@ -199,14 +199,6 @@ struct SettingsView: View {
         )
     }
 
-    /// Bridges a stored `#RRGGBB` string to a `ColorPicker`'s `Binding<Color>`.
-    private func paletteBinding(_ hex: Binding<String>) -> Binding<Color> {
-        Binding(
-            get: { CustomPalette.color(hex.wrappedValue) ?? .gray },
-            set: { hex.wrappedValue = CustomPalette.hex($0) }
-        )
-    }
-
     private func chooseRecordingsFolder() {
         guard let url = pickFolder(message: "Choose a folder to save recordings into.") else { return }
         env.bookmarks.rememberRecordingsFolder(url)
@@ -228,5 +220,45 @@ struct SettingsView: View {
         panel.message = message
         guard panel.runModal() == .OK else { return nil }
         return panel.url
+    }
+}
+
+/// One palette colour: the native well plus an editable `#RRGGBB` field. Typing commits on
+/// Return or focus loss; an unparseable value snaps back.
+private struct HexColorRow: View {
+    let label: String
+    @Binding var hex: String
+    @State private var draft = ""
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        LabeledContent(label) {
+            HStack(spacing: 8) {
+                ColorPicker("", selection: colorBinding, supportsOpacity: false).labelsHidden()
+                TextField("#RRGGBB", text: $draft)
+                    .frame(width: 92)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(.body, design: .monospaced))
+                    .focused($focused)
+                    .onSubmit(commit)
+                    .onChange(of: focused) { _, isFocused in if !isFocused { commit() } }
+            }
+        }
+        .onAppear { draft = hex }
+        .onChange(of: hex) { _, new in if !focused { draft = new } }
+    }
+
+    private var colorBinding: Binding<Color> {
+        Binding(
+            get: { CustomPalette.color(hex) ?? .gray },
+            set: { hex = CustomPalette.hex($0); draft = hex }
+        )
+    }
+
+    private func commit() {
+        if let c = CustomPalette.color(draft) {
+            hex = CustomPalette.hex(c)
+        }
+        draft = hex   // canonicalise, or revert if invalid
     }
 }
