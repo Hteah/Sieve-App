@@ -10,6 +10,9 @@ struct SampleListView: View {
     /// the width settles. A manual divider drag / window resize leaves this false and updates live.
     var paneToggleActive = false
     @AppStorage("autoPreview") private var autoPreview = true
+    /// "Auto-preview browsing" mode (toggled from the pane bar): any click on a row, and every
+    /// arrow-key move, previews the file from the start; the waveform stops seeking to the tap.
+    @AppStorage("browsePreview") private var browsePreview = false
     @AppStorage(QuickTags.storageKey) private var quickTagSlotsJSON = ""
     @State private var columnCustomization = TableColumnCustomization<SampleRow>()
     /// Latest list width seen while a pane toggle is animating; applied once the toggle settles.
@@ -47,7 +50,11 @@ struct SampleListView: View {
                 TableColumn("Waveform") { row in
                     WaveformCell(row: row) { fraction in
                         model.selection = [row.id]
-                        env.seek(row, toFraction: fraction)
+                        if browsePreview {
+                            env.preview(row)                       // browse mode: always from the top
+                        } else {
+                            env.seek(row, toFraction: fraction)
+                        }
                         listFocused = true
                     }
                 }
@@ -214,7 +221,8 @@ struct SampleListView: View {
                 return .handled
             }
             .onChange(of: model.selection) { _, new in
-                guard autoPreview, new.count == 1, let row = model.primarySelection, row.status == .present else { return }
+                guard browsePreview || autoPreview,
+                      new.count == 1, let row = model.primarySelection, row.status == .present else { return }
                 // Don't restart from the top if this sample is already loaded (e.g. the user
                 // just clicked its waveform to seek).
                 guard env.player.currentSampleId != row.id else { return }

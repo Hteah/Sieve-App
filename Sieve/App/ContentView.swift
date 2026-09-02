@@ -11,6 +11,7 @@ struct ContentView: View {
     @State private var followTask: Task<Void, Never>?
     @State private var controlHint = ControlHint()
     @AppStorage("showControlInfo") private var showControlInfo = false
+    @AppStorage("browsePreview") private var browsePreview = false
     // True while a sidebar/inspector show-hide animation is in flight. The list debounces its
     // responsive-column recalculation during this window so the animated width sweep doesn't
     // stall on a Table re-layout; a manual divider drag leaves it false and updates live.
@@ -107,6 +108,14 @@ struct ContentView: View {
             }
             .infoBubble(sidebarShown ? "Hide sidebar" : "Show sidebar")
             .keyboardShortcut("s", modifiers: [.control, .command])
+
+            Button { browsePreview.toggle() } label: {
+                Image(systemName: browsePreview ? "waveform.circle.fill" : "waveform.circle")
+                    .foregroundStyle(browsePreview ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
+            }
+            .infoBubble(browsePreview ? "Turn off auto-preview browsing" : "Turn on auto-preview browsing")
+            .keyboardShortcut("b", modifiers: [.control, .command])
+            .padding(.leading, 10)
 
             Spacer(minLength: 0)
 
