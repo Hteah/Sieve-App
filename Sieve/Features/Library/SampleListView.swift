@@ -412,8 +412,9 @@ extension Int64: @retroactive Transferable {
     }
 }
 
-/// Drag payload for a sample row: exports the real audio file (for Finder / other apps) and,
-/// as a fallback representation, the sample id (used by the sidebar tag drop targets).
+/// Drag payload for a sample row: exports the real audio file (for Finder / other apps), and the
+/// sample id **as plain text** so the sidebar's AppKit drop catchers can read it off the
+/// pasteboard (SwiftUI's own `.dropDestination` on `List` rows loses the payload).
 struct SampleDrag: Transferable {
     let id: Int64
     let fileURL: URL?
@@ -436,7 +437,7 @@ struct SampleDrag: Transferable {
         }
         .suggestedFileName { $0.filename }
 
-        ProxyRepresentation(exporting: { $0.id })
+        ProxyRepresentation(exporting: { String($0.id) })
     }
 }
 

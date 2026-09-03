@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct SidebarView: View {
@@ -13,6 +14,8 @@ struct SidebarView: View {
     @State private var quickTagIconSlot: Int?
     @State private var quickTagNameDraft = ""
     @State private var moveHere: MoveHereRequest?
+    /// Folder row a sample drag is hovering, keyed `r:<id>` / `n:<rootId>:<path>`.
+    @State private var dropHoverKey: String?
 
     private struct MoveHereRequest: Identifiable {
         let id = UUID()
@@ -29,6 +32,16 @@ struct SidebarView: View {
         let rows = movableSelection
         guard !rows.isEmpty else { return }
         moveHere = MoveHereRequest(rows: rows, destination: destination)
+    }
+
+    /// Called by the AppKit drop catcher when sample ids are dropped on a folder row.
+    private func acceptDrop(_ ids: [Int64], into destination: URL, sameFolder: (SampleRow) -> Bool) -> Bool {
+        let set = Set(ids)
+        let rows = model.rows.filter { set.contains($0.id) && $0.status == .present && !sameFolder($0) }
+        guard !rows.isEmpty else { return false }
+        // Defer past the drag operation completing before driving `.sheet(item:)`.
+        DispatchQueue.main.async { moveHere = MoveHereRequest(rows: rows, destination: destination) }
+        return true
     }
 
     private enum GroupSheet: Identifiable {
@@ -176,7 +189,13 @@ struct SidebarView: View {
         if let id = root.id {
             DisclosureGroup {
                 OutlineGroup(model.folderTrees[id] ?? [], children: \.childrenOrNil) { node in
+                    let key = "n:\(node.rootId):\(node.path)"
                     Label(node.name, systemImage: "folder")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.vertical, 1).padding(.horizontal, 3)
+                        .background(dropHoverKey == key ? Color.accentColor.opacity(0.28) : .clear,
+                                    in: RoundedRectangle(cornerRadius: 4))
+                        .overlay { folderDropCatcher(key: key, rootId: node.rootId, subpath: node.path) }
                         .tag(LibraryScope.folder(rootId: node.rootId, parentDir: node.path))
                         .contextMenu {
                             Button("Move Selected Samples Here") {
@@ -194,8 +213,25 @@ struct SidebarView: View {
         }
     }
 
+    /// Transparent AppKit view that catches a sample-row drag on a folder row — SwiftUI's own
+    /// `.dropDestination` on `List` rows silently drops the payload, so we read `NSPasteboard`
+    /// directly.
+    private func folderDropCatcher(key: String, rootId: Int64, subpath: String) -> some View {
+        SampleDropCatcher(
+            onTargeted: { over in
+                if over { dropHoverKey = key } else if dropHoverKey == key { dropHoverKey = nil }
+            },
+            onDrop: { ids in
+                guard let root = env.rootURL(for: rootId) else { return false }
+                let dest = subpath.isEmpty ? root : root.appending(path: subpath)
+                return acceptDrop(ids, into: dest) { $0.rootId == rootId && $0.parentDir == subpath }
+            }
+        )
+    }
+
     @ViewBuilder
     private func rootLabel(_ root: Root, id: Int64) -> some View {
+        let key = "r:\(id)"
         HStack(spacing: 6) {
             Circle().fill(root.isAvailable ? Color.green : Color.orange).frame(width: 7, height: 7)
                 .help(root.isAvailable ? "Available" : "Volume not mounted")
@@ -207,6 +243,10 @@ struct SidebarView: View {
                 Text("\(root.fileCount)").font(.caption).foregroundStyle(.secondary)
             }
         }
+        .padding(.vertical, 1).padding(.horizontal, 3)
+        .background(dropHoverKey == key ? Color.accentColor.opacity(0.28) : .clear,
+                    in: RoundedRectangle(cornerRadius: 4))
+        .overlay { folderDropCatcher(key: key, rootId: id, subpath: "") }
         .contextMenu {
             Button("Rescan") { Task { await env.scanner.scan(rootId: id) } }
             Button("Reveal in Finder") {
@@ -303,4 +343,68 @@ struct SidebarView: View {
 
 extension Queries.FolderNode {
     var childrenOrNil: [Queries.FolderNode]? { children.isEmpty ? nil : children }
+}
+
+/// A mouse-transparent AppKit view laid over a sidebar folder row that accepts a sample-row drag.
+/// SwiftUI's `.dropDestination` on `List` rows accepts the hover but hands the drop an empty
+/// payload, so we register for dragged types and read the pasteboard ourselves. The list rows
+/// put the sample id on the drag as plain text (see `SampleDrag`).
+struct SampleDropCatcher: NSViewRepresentable {
+    var onTargeted: (Bool) -> Void
+    /// Return true to accept; ids are the dragged sample-row ids.
+    var onDrop: ([Int64]) -> Bool
+
+    func makeNSView(context: Context) -> CatcherView {
+        let v = CatcherView()
+        v.onTargeted = onTargeted
+        v.onDrop = onDrop
+        return v
+    }
+
+    func updateNSView(_ nsView: CatcherView, context: Context) {
+        nsView.onTargeted = onTargeted
+        nsView.onDrop = onDrop
+    }
+
+    final class CatcherView: NSView {
+        var onTargeted: ((Bool) -> Void)?
+        var onDrop: (([Int64]) -> Bool)?
+
+        override init(frame frameRect: NSRect) {
+            super.init(frame: frameRect)
+            registerForDraggedTypes([.string])
+        }
+        required init?(coder: NSCoder) { fatalError("not from a nib") }
+
+        // Let clicks / row selection pass straight through to the SwiftUI row underneath.
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+        override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+            let ok = !Self.ids(from: sender).isEmpty
+            onTargeted?(ok)
+            return ok ? .move : []
+        }
+        override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+            Self.ids(from: sender).isEmpty ? [] : .move
+        }
+        override func draggingExited(_ sender: NSDraggingInfo?) { onTargeted?(false) }
+        override func draggingEnded(_ sender: NSDraggingInfo) { onTargeted?(false) }
+        override func prepareForDragOperation(_ sender: NSDraggingInfo) -> Bool {
+            !Self.ids(from: sender).isEmpty
+        }
+        override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+            onTargeted?(false)
+            return onDrop?(Self.ids(from: sender)) ?? false
+        }
+
+        private static func ids(from sender: NSDraggingInfo) -> [Int64] {
+            let pb = sender.draggingPasteboard
+            if let items = pb.pasteboardItems, !items.isEmpty {
+                let parsed = items.compactMap { $0.string(forType: .string).flatMap { Int64($0) } }
+                if !parsed.isEmpty { return parsed }
+            }
+            if let s = pb.string(forType: .string), let one = Int64(s) { return [one] }
+            return []
+        }
+    }
 }
