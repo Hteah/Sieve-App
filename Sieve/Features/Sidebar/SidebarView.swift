@@ -1,5 +1,18 @@
 import AppKit
+import GRDB
 import SwiftUI
+
+/// Fetch full `SampleRow`s by id straight from the DB — used when a drag lands in a window whose
+/// filtered list doesn't contain the dragged rows (e.g. dropped from another window).
+@MainActor
+func fetchSampleRows(_ ids: [Int64], from database: AppDatabase) async -> [SampleRow] {
+    guard !ids.isEmpty else { return [] }
+    let marks = databaseQuestionMarks(count: ids.count)
+    return (try? await database.reader.read { db in
+        try SampleRow.fetchAll(db, sql: "SELECT * FROM sample_with_annotation WHERE id IN (\(marks))",
+                               arguments: StatementArguments(ids))
+    }) ?? []
+}
 
 struct SidebarView: View {
     @Environment(AppEnvironment.self) private var env
@@ -35,12 +48,15 @@ struct SidebarView: View {
     }
 
     /// Called by the AppKit drop catcher when sample ids are dropped on a folder row.
-    private func acceptDrop(_ ids: [Int64], into destination: URL, sameFolder: (SampleRow) -> Bool) -> Bool {
-        let set = Set(ids)
-        let rows = model.rows.filter { set.contains($0.id) && $0.status == .present && !sameFolder($0) }
-        guard !rows.isEmpty else { return false }
-        // Defer past the drag operation completing before driving `.sheet(item:)`.
-        DispatchQueue.main.async { moveHere = MoveHereRequest(rows: rows, destination: destination) }
+    private func acceptDrop(_ ids: [Int64], into destination: URL, sameFolder: @escaping (SampleRow) -> Bool) -> Bool {
+        guard !ids.isEmpty else { return false }
+        // Look the rows up in the DB (not `model.rows` — the drag may be from another window).
+        Task { @MainActor in
+            let rows = await fetchSampleRows(ids, from: env.database)
+                .filter { $0.status == .present && !sameFolder($0) }
+            guard !rows.isEmpty else { return }
+            moveHere = MoveHereRequest(rows: rows, destination: destination)
+        }
         return true
     }
 
@@ -104,7 +120,7 @@ struct SidebarView: View {
                     }
                     .padding(.vertical, 1).padding(.horizontal, 3)
                     .background { dropHighlight(key) }
-                    .overlay {
+                    .background {
                         tagDropCatcher(key: key) { rows in
                             Task { try? await AnnotationStore(database: env.database).addTag(named: tag.name, to: rows) }
                         }
@@ -132,7 +148,7 @@ struct SidebarView: View {
                     }
                     .padding(.vertical, 1).padding(.horizontal, 3)
                     .background { dropHighlight(key) }
-                    .overlay {
+                    .background {
                         tagDropCatcher(key: key) { rows in
                             Task { try? await AnnotationStore(database: env.database).addQuickTag(i, to: rows) }
                         }
@@ -199,9 +215,8 @@ struct SidebarView: View {
                     Label(node.name, systemImage: "folder")
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.vertical, 1).padding(.horizontal, 3)
-                        .background(dropHoverKey == key ? Color.accentColor.opacity(0.28) : .clear,
-                                    in: RoundedRectangle(cornerRadius: 4))
-                        .overlay { folderDropCatcher(key: key, rootId: node.rootId, subpath: node.path) }
+                        .background { dropHighlight(key) }
+                        .background { folderDropCatcher(key: key, rootId: node.rootId, subpath: node.path) }
                         .tag(LibraryScope.folder(rootId: node.rootId, parentDir: node.path))
                         .contextMenu {
                             Button("Move Selected Samples Here") {
@@ -219,9 +234,6 @@ struct SidebarView: View {
         }
     }
 
-    /// Transparent AppKit view that catches a sample-row drag on a folder row — SwiftUI's own
-    /// `.dropDestination` on `List` rows silently drops the payload, so we read `NSPasteboard`
-    /// directly.
     private func folderDropCatcher(key: String, rootId: Int64, subpath: String) -> some View {
         SampleDropCatcher(
             onTargeted: { over in
@@ -242,10 +254,12 @@ struct SidebarView: View {
                 if over { dropHoverKey = key } else if dropHoverKey == key { dropHoverKey = nil }
             },
             onDrop: { ids in
-                let set = Set(ids)
-                let rows = model.rows.filter { set.contains($0.id) }
-                guard !rows.isEmpty else { return false }
-                apply(rows)
+                guard !ids.isEmpty else { return false }
+                Task { @MainActor in
+                    let rows = await fetchSampleRows(ids, from: env.database)
+                    guard !rows.isEmpty else { return }
+                    apply(rows)
+                }
                 return true
             }
         )
@@ -272,9 +286,8 @@ struct SidebarView: View {
             }
         }
         .padding(.vertical, 1).padding(.horizontal, 3)
-        .background(dropHoverKey == key ? Color.accentColor.opacity(0.28) : .clear,
-                    in: RoundedRectangle(cornerRadius: 4))
-        .overlay { folderDropCatcher(key: key, rootId: id, subpath: "") }
+        .background { dropHighlight(key) }
+        .background { folderDropCatcher(key: key, rootId: id, subpath: "") }
         .contextMenu {
             Button("Rescan") { Task { await env.scanner.scan(rootId: id) } }
             Button("Reveal in Finder") {
@@ -373,10 +386,12 @@ extension Queries.FolderNode {
     var childrenOrNil: [Queries.FolderNode]? { children.isEmpty ? nil : children }
 }
 
-/// A mouse-transparent AppKit view laid over a sidebar folder row that accepts a sample-row drag.
-/// SwiftUI's `.dropDestination` on `List` rows accepts the hover but hands the drop an empty
-/// payload, so we register for dragged types and read the pasteboard ourselves. The list rows
-/// put the sample id on the drag as plain text (see `SampleDrag`).
+/// AppKit drop target for a sample-row drag, placed as a `.background` behind a sidebar folder /
+/// tag row or the list pane. SwiftUI's own `.dropDestination` on `List` rows takes the hover but
+/// hands the drop an empty payload, and doesn't see drags from another window at all; reading
+/// `NSPasteboard` directly works for both. The dragged rows carry their id as plain text
+/// (`SampleDrag`); the drop handler resolves ids against the DB, since a cross-window drop lands
+/// in a window whose filtered list may not contain them.
 struct SampleDropCatcher: NSViewRepresentable {
     var onTargeted: (Bool) -> Void
     /// Return true to accept; ids are the dragged sample-row ids.
@@ -404,9 +419,9 @@ struct SampleDropCatcher: NSViewRepresentable {
         }
         required init?(coder: NSCoder) { fatalError("not from a nib") }
 
-        // Let clicks / row selection pass straight through to the SwiftUI row underneath.
-        override func hitTest(_ point: NSPoint) -> NSView? { nil }
-
+        // Sits *behind* the row content (`.background`), so clicks land on the SwiftUI row and this
+        // view only ever sees drags. It must stay hit-testable — a `hitTest`→nil override here hides
+        // it from AppKit's drag routing for drags that started in another window.
         override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
             let ok = !Self.ids(from: sender).isEmpty
             onTargeted?(ok)

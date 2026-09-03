@@ -2,6 +2,8 @@ import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 
+// `fetchSampleRows`, `SampleDropCatcher` live in SidebarView.swift (same module).
+
 struct SampleListView: View {
     @Environment(AppEnvironment.self) private var env
     @Environment(\.palette) private var palette
@@ -19,6 +21,7 @@ struct SampleListView: View {
     @State private var deferredWidth: CGFloat?
     @State private var convertRequest: ConvertRequest?
     @State private var moveRequest: MoveRequest?
+    @State private var listDropTargeted = false
     // A tap on a row's waveform runs a DragGesture inside the Table cell, which knocks
     // keyboard focus off the Table — so the next Space press lands nowhere (or in the
     // search field). Re-assert focus here after any row/waveform interaction.
@@ -239,6 +242,21 @@ struct SampleListView: View {
             .overlay {
                 if model.rows.isEmpty { emptyState }
             }
+            // Drop samples (from this window or another) onto the list to move them into the
+            // folder this window is scoped to. Catcher sits behind the Table.
+            .background {
+                if dropScopeFolder != nil {
+                    SampleDropCatcher(onTargeted: { listDropTargeted = $0 }, onDrop: handleListDrop)
+                }
+            }
+            .overlay {
+                if listDropTargeted {
+                    RoundedRectangle(cornerRadius: 4)
+                        .strokeBorder(Color.accentColor, lineWidth: 2)
+                        .padding(1)
+                        .allowsHitTesting(false)
+                }
+            }
             .sheet(item: $convertRequest) { req in
                 BatchConvertSheet(model: model, rows: req.rows)
             }
@@ -383,6 +401,33 @@ struct SampleListView: View {
             ScanProgressView()
         }
         .padding(.horizontal, 10).padding(.vertical, 4)
+    }
+
+    /// The folder this window's list is scoped to, if it's a single root or sub-folder — the drop
+    /// destination when samples are dragged onto the list. `here` filters out rows already there.
+    private var dropScopeFolder: (dest: URL, here: (SampleRow) -> Bool)? {
+        switch model.filter.scope {
+        case .root(let id):
+            guard let u = env.rootURL(for: id) else { return nil }
+            return (u, { $0.rootId == id && $0.parentDir.isEmpty })
+        case .folder(let rootId, let parentDir):
+            guard let u = env.rootURL(for: rootId) else { return nil }
+            return (u.appending(path: parentDir), { $0.rootId == rootId && $0.parentDir == parentDir })
+        default:
+            return nil
+        }
+    }
+
+    /// Samples were dropped on the list — move them into the folder this window is scoped to.
+    private func handleListDrop(_ ids: [Int64]) -> Bool {
+        guard let (dest, here) = dropScopeFolder, !ids.isEmpty else { return false }
+        Task { @MainActor in
+            let rows = await fetchSampleRows(ids, from: env.database)
+                .filter { $0.status == .present && !here($0) }
+            guard !rows.isEmpty else { return }
+            moveRequest = MoveRequest(rows: rows, destination: dest)
+        }
+        return true
     }
 
     /// Folder picker for "Move to Folder…"; on OK, stages a confirmation sheet.
