@@ -29,6 +29,9 @@ struct SidebarView: View {
     @State private var moveHere: MoveHereRequest?
     /// Folder row a sample drag is hovering, keyed `r:<id>` / `n:<rootId>:<path>`.
     @State private var dropHoverKey: String?
+    /// Sidebar row selection. One entry drives the browse scope (`model.filter.scope`); ⇧/⌘-click
+    /// a run of folder rows to select several at once for batch actions like "Move to Group".
+    @State private var selection: Set<LibraryScope> = []
 
     private struct MoveHereRequest: Identifiable {
         let id = UUID()
@@ -61,11 +64,11 @@ struct SidebarView: View {
     }
 
     private enum GroupSheet: Identifiable {
-        case create(assignRoot: Int64?)
+        case create(assignRoots: [Int64])
         case rename(FolderGroup)
         var id: String {
             switch self {
-            case .create(let r): "create-\(r.map(String.init) ?? "")"
+            case .create: "create"
             case .rename(let g): "rename-\(g.id ?? 0)"
             }
         }
@@ -75,7 +78,7 @@ struct SidebarView: View {
     private var groupStore: FolderGroupStore { FolderGroupStore(database: env.database) }
 
     var body: some View {
-        List(selection: scopeBinding) {
+        List(selection: $selection) {
             Section("Library") {
                 Label("All Samples", systemImage: "waveform").tag(LibraryScope.all)
                 Label("Favorites", systemImage: "heart").tag(LibraryScope.favorites)
@@ -103,7 +106,7 @@ struct SidebarView: View {
 
                 Button {
                     groupNameDraft = ""
-                    groupSheet = .create(assignRoot: nil)
+                    groupSheet = .create(assignRoots: [])
                 } label: {
                     Label("New Group…", systemImage: "folder.badge.plus")
                 }
@@ -167,6 +170,14 @@ struct SidebarView: View {
         }
         .listStyle(.sidebar)
         .themedSurface(palette)
+        // Keep the single-select case wired to the browse scope, both ways. A multi-select
+        // (>1 folder rows) is left alone so the centre pane keeps showing the last folder.
+        .onChange(of: selection) { _, sel in
+            if sel.count == 1, let s = sel.first { model.filter.scope = s }
+        }
+        .onChange(of: model.filter.scope, initial: true) { _, s in
+            if selection.count <= 1 { selection = [s] }
+        }
         .alert("Rename Quick Tag", isPresented: Binding(get: { quickTagRenameSlot != nil }, set: { if !$0 { quickTagRenameSlot = nil } })) {
             TextField("Name", text: $quickTagNameDraft)
             Button("Cancel", role: .cancel) { quickTagRenameSlot = nil }
@@ -299,21 +310,7 @@ struct SidebarView: View {
             }
             .disabled(movableSelection.isEmpty)
             Divider()
-            Menu("Move to Group") {
-                ForEach(model.groups) { group in
-                    if let gid = group.id {
-                        Button(group.name) { Task { try? await groupStore.assign(rootId: id, to: gid) } }
-                            .disabled(root.groupId == gid)
-                    }
-                }
-                if !model.groups.isEmpty { Divider() }
-                Button("None") { Task { try? await groupStore.assign(rootId: id, to: nil) } }
-                    .disabled(root.groupId == nil)
-                Button("New Group…") {
-                    groupNameDraft = ""
-                    groupSheet = .create(assignRoot: id)
-                }
-            }
+            groupMenu(for: id, root: root)
             Divider()
             Button("Remove from Library…", role: .destructive) { rootToRemove = root }
         }
@@ -339,8 +336,33 @@ struct SidebarView: View {
 
     // MARK: Helpers
 
-    private var scopeBinding: Binding<LibraryScope?> {
-        Binding(get: { model.filter.scope }, set: { if let s = $0 { model.filter.scope = s } })
+    /// Root ids currently multi-selected in the sidebar (⇧/⌘-click on folder rows).
+    private var selectedRootIds: [Int64] {
+        selection.compactMap { if case .root(let id) = $0 { id } else { nil } }
+    }
+
+    /// "Move to Group" — acts on every multi-selected folder when this row is one of them,
+    /// otherwise just this row.
+    @ViewBuilder
+    private func groupMenu(for id: Int64, root: Root) -> some View {
+        let selected = selectedRootIds
+        let targets = selected.count > 1 && selected.contains(id) ? selected : [id]
+        let title = targets.count > 1 ? "Move \(targets.count) Folders to Group" : "Move to Group"
+        Menu(title) {
+            ForEach(model.groups) { group in
+                if let gid = group.id {
+                    Button(group.name) { Task { try? await groupStore.assign(rootIds: targets, to: gid) } }
+                        .disabled(targets.count == 1 && root.groupId == gid)
+                }
+            }
+            if !model.groups.isEmpty { Divider() }
+            Button("None (Ungrouped)") { Task { try? await groupStore.assign(rootIds: targets, to: nil) } }
+                .disabled(targets.count == 1 && root.groupId == nil)
+            Button("New Group…") {
+                groupNameDraft = ""
+                groupSheet = .create(assignRoots: targets)
+            }
+        }
     }
 
     private func roots(in groupId: Int64) -> [Root] {
@@ -370,10 +392,10 @@ struct SidebarView: View {
         let name = groupNameDraft
         groupSheet = nil
         switch sheet {
-        case .create(let assignRoot):
+        case .create(let assignRoots):
             Task {
                 guard let gid = try? await groupStore.create(name: name) else { return }
-                if let rootId = assignRoot { try? await groupStore.assign(rootId: rootId, to: gid) }
+                try? await groupStore.assign(rootIds: assignRoots, to: gid)
             }
         case .rename(let group):
             guard let id = group.id else { return }

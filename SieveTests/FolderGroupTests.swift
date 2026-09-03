@@ -39,6 +39,18 @@ struct FolderGroupTests {
         #expect(rootAAfter?.groupId == nil)          // FK onDelete: .setNull
     }
 
+    @Test func assignManyRootsAtOnce() async throws {
+        let w = try await makeWorld()
+        let gid = try await w.store.create(name: "Kits")
+        try await w.store.assign(rootIds: [w.rootA, w.rootB], to: gid)
+        let roots = try await w.db.reader.read { try Root.fetchAll($0) }
+        #expect(roots.allSatisfy { $0.groupId == gid })
+
+        try await w.store.assign(rootIds: [w.rootA, w.rootB], to: nil)
+        let after = try await w.db.reader.read { try Root.fetchAll($0) }
+        #expect(after.allSatisfy { $0.groupId == nil })
+    }
+
     @Test func emptyNameRejected() async throws {
         let w = try await makeWorld()
         await #expect(throws: FolderGroupStore.StoreError.self) { try await w.store.create(name: "   ") }

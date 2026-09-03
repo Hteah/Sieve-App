@@ -33,8 +33,16 @@ struct FolderGroupStore: Sendable {
 
     /// Moves a root into `groupId` (nil = ungrouped).
     func assign(rootId: Int64, to groupId: Int64?) async throws {
+        try await assign(rootIds: [rootId], to: groupId)
+    }
+
+    /// Moves several roots into `groupId` (nil = ungrouped) in one transaction.
+    func assign(rootIds: [Int64], to groupId: Int64?) async throws {
+        guard !rootIds.isEmpty else { return }
         try await database.writer.write { db in
-            try db.execute(sql: "UPDATE root SET groupId = ? WHERE id = ?", arguments: [groupId, rootId])
+            for id in rootIds {
+                try db.execute(sql: "UPDATE root SET groupId = ? WHERE id = ?", arguments: [groupId, id])
+            }
         }
     }
 
