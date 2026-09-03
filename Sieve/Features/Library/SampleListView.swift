@@ -392,7 +392,7 @@ struct SampleListView: View {
     }
 
     private var statusBar: some View {
-        HStack {
+        HStack(spacing: 8) {
             Text("\(model.rows.count) samples").font(.caption).foregroundStyle(.secondary)
             if !model.selection.isEmpty {
                 Text("· \(model.selection.count) selected").font(.caption).foregroundStyle(.secondary)
@@ -523,6 +523,7 @@ struct WaveformCell: View {
 }
 
 struct FilterBar: View {
+    @Environment(AppEnvironment.self) private var env
     @Environment(\.palette) private var palette
     @Bindable var model: LibraryViewModel
 
@@ -573,6 +574,12 @@ struct FilterBar: View {
             Text(model.filter.extensions.isEmpty ? "All formats" : model.filter.extensions.sorted().map { $0.uppercased() }.joined(separator: ","))
         }
         .frame(width: 130)
+
+        Toggle(isOn: Binding(get: { env.player.looping }, set: { env.player.looping = $0 })) {
+            Label("Loop", systemImage: "repeat")
+        }
+        .toggleStyle(.button)
+        .help(env.player.looping ? "Looping the preview — click to stop" : "Loop the previewed sample")
     }
 }
 

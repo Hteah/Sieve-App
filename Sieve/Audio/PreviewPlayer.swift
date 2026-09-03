@@ -30,6 +30,8 @@ final class PreviewPlayer {
     private(set) var position: TimeInterval = 0
     private(set) var duration: TimeInterval = 0
     var volume: Float = 1 { didSet { node.volume = volume } }
+    /// When on, a preview restarts from the top instead of stopping when it reaches the end.
+    var looping = false
 
     init() {
         engine.attach(node)
@@ -131,6 +133,10 @@ final class PreviewPlayer {
     }
 
     private func finishAtEnd() {
+        if looping, file != nil {
+            seek(to: 0)   // reschedule from the top; keeps isPlaying / the timer running
+            return
+        }
         isPlaying = false
         position = duration
         playStartDate = nil
