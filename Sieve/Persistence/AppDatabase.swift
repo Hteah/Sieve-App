@@ -187,6 +187,14 @@ final class AppDatabase: Sendable {
                 """)
         }
 
+        m.registerMigration("v4-file-op-undo") { db in
+            // Marks a logged move that has since been undone, so the History window
+            // can grey out its Undo button and not offer it twice.
+            try db.alter(table: "file_op_log") { t in
+                t.add(column: "undoneAt", .datetime)
+            }
+        }
+
         return m
     }
 }

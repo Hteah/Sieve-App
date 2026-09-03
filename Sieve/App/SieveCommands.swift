@@ -16,6 +16,9 @@ struct SieveCommands: Commands {
             // via `noteListSelection`, so no row needs to be passed here.
             Button("Open in Wave Editor") { openWindow(id: "audio-editor") }
                 .keyboardShortcut("e", modifiers: [.command])
+            Divider()
+            Button("Move History…") { openWindow(id: "move-history") }
+                .keyboardShortcut("y", modifiers: [.command])
             Button("Purge Missing Samples") { Task { await env.scanner.purgeMissing() } }
         }
         CommandGroup(after: .sidebar) {

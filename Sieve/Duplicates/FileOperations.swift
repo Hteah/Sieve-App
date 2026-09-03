@@ -147,6 +147,99 @@ actor FileOperator {
         return results
     }
 
+    /// Reverses a logged `move`: pulls the file back from where it was moved to and returns it to
+    /// its original root + relative path, re-pathing the sample row and rescanning is left to the
+    /// caller. Marks the original log row `undoneAt` and writes an "undo move" row of its own.
+    /// Fails (without touching anything) if the file isn't where the log says, the original volume
+    /// is offline, or the destination sits in a folder Sieve can no longer reach.
+    func undoMove(_ log: FileOpLog) async -> FileOpResult {
+        let home = (log.relativePath as NSString).lastPathComponent
+        var result = FileOpResult(sampleId: log.sampleId ?? 0, filename: home,
+                                  relativePath: log.relativePath, succeeded: false)
+        guard log.isUndoableMove, let logId = log.id, let destPath = log.destinationPath else {
+            result.error = "This operation can't be undone."
+            return result
+        }
+
+        let roots = (try? await database.reader.read { db in try Root.fetchAll(db) }) ?? []
+        let rootsById = Dictionary(uniqueKeysWithValues: roots.compactMap { r in r.id.map { ($0, r) } })
+        guard let srcRoot = rootsById[log.rootId], srcRoot.isAvailable,
+              let srcRootURL = try? resolveRoot(srcRoot) else {
+            result.error = "The original folder isn't available — reconnect its volume and try again."
+            return result
+        }
+
+        let srcScoped = srcRootURL.startAccessingSecurityScopedResource()
+        defer { if srcScoped { srcRootURL.stopAccessingSecurityScopedResource() } }
+
+        // The file now lives at `destPath`; hold scope on the indexed root that contains it (if any)
+        // so the sandbox lets us move it back out.
+        let destURL = URL(fileURLWithPath: destPath)
+        var destRootURL: URL?
+        for (_, r) in rootsById where r.isAvailable {
+            guard let u = try? resolveRoot(r) else { continue }
+            let p = u.standardizedFileURL.path
+            if destPath == p || destPath.hasPrefix(p + "/") { destRootURL = u; break }
+        }
+        let destScoped = destRootURL?.startAccessingSecurityScopedResource() ?? false
+        defer { if destScoped, let d = destRootURL { d.stopAccessingSecurityScopedResource() } }
+
+        guard fs.exists(destURL) else {
+            result.error = "The moved file isn't where it was left — it may have been moved or deleted "
+                + "since, or it's in a folder Sieve no longer has access to."
+            return result
+        }
+
+        let target = srcRootURL.appending(path: log.relativePath)
+        let targetParent = target.deletingLastPathComponent()
+        let finalTarget: URL
+        do {
+            if !fs.exists(targetParent) {
+                try FileManager.default.createDirectory(at: targetParent, withIntermediateDirectories: true)
+            }
+            finalTarget = Self.uniqueDestination(in: targetParent, filename: target.lastPathComponent, exists: fs.exists)
+            try fs.move(destURL, to: finalTarget)
+        } catch {
+            result.error = error.localizedDescription
+            Self.log.error("undo move failed for \(destPath, privacy: .public): \(error, privacy: .public)")
+            return result
+        }
+        result.destination = finalTarget
+        result.succeeded = true
+
+        let now = Date()
+        let rel: String = {
+            let rootPath = srcRootURL.standardizedFileURL.path
+            var r = String(finalTarget.standardizedFileURL.path.dropFirst(rootPath.count))
+            if r.hasPrefix("/") { r.removeFirst() }
+            return r
+        }()
+        result.relativePath = rel
+        let comps = rel.split(separator: "/")
+        let parent = comps.dropLast().joined(separator: "/")
+        let name = comps.last.map(String.init) ?? rel
+        do {
+            try await database.writer.write { db in
+                if let sid = log.sampleId {
+                    try db.execute(sql: "DELETE FROM sample WHERE rootId = ? AND relativePath = ? AND id != ?",
+                                   arguments: [log.rootId, rel, sid])
+                    try db.execute(sql: """
+                        UPDATE sample SET rootId = ?, relativePath = ?, parentDir = ?, filename = ?,
+                                          status = 'present', lastSeenAt = ? WHERE id = ?
+                        """, arguments: [log.rootId, rel, parent, name, now, sid])
+                }
+                try db.execute(sql: "UPDATE file_op_log SET undoneAt = ? WHERE id = ?", arguments: [now, logId])
+                var undo = FileOpLog(sampleId: log.sampleId, rootId: log.rootId, relativePath: rel,
+                                     op: "undo move", destinationPath: destPath, performedAt: now,
+                                     succeeded: true, error: nil, undoneAt: nil)
+                try undo.insert(db)
+            }
+        } catch {
+            Self.log.error("undo reconcile failed: \(error, privacy: .public)")
+        }
+        return result
+    }
+
     /// `name.ext`, `name (2).ext`, `name (3).ext`…
     static func uniqueDestination(in dir: URL, filename: String, exists: (URL) -> Bool) -> URL {
         var candidate = dir.appending(path: filename)

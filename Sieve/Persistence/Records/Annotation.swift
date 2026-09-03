@@ -60,11 +60,19 @@ struct FileOpLog: Codable, Identifiable, Hashable, Sendable, FetchableRecord, Mu
     var sampleId: Int64?
     var rootId: Int64
     var relativePath: String
-    var op: String          // "trash" | "move" | "delete"
+    var op: String          // "trash" | "move" | "delete" | "undo move"
     var destinationPath: String?
     var performedAt: Date
     var succeeded: Bool
     var error: String?
+    /// Set when this move was later reversed from the History window; nil otherwise.
+    var undoneAt: Date?
 
     mutating func didInsert(_ inserted: InsertionSuccess) { id = inserted.rowID }
+
+    /// A successful move that hasn't been reversed yet — the only kind of row the
+    /// History window offers an Undo for.
+    var isUndoableMove: Bool {
+        op == "move" && succeeded && undoneAt == nil && destinationPath != nil
+    }
 }

@@ -35,6 +35,13 @@ struct SieveApp: App {
         }
         .defaultSize(width: 1040, height: 560)
 
+        Window("Move History", id: "move-history") {
+            MoveHistoryView()
+                .environment(env)
+                .modifier(Themed())
+        }
+        .defaultSize(width: 900, height: 480)
+
         Settings {
             SettingsView()
                 .environment(env)

@@ -123,6 +123,44 @@ struct FileOperatorTests {
         #expect(row["status"] == "present")
     }
 
+    @Test func undoMovePutsFileBackAndRepaths() async throws {
+        let w = try await makeWorld()
+        let sample = try await groups(w.db)[0].members.first { $0.relativePath == "B/kick.wav" }!
+        let dest = w.root.appending(path: "A")                       // collision → "kick (2).wav"
+        _ = await w.op.perform(.move(destination: dest), on: [sample])
+        #expect(!FileManager.default.fileExists(atPath: w.root.appending(path: "B/kick.wav").path))
+
+        let moveLog = try await w.db.reader.read { db in
+            try FileOpLog.fetchAll(db, sql: "SELECT * FROM file_op_log WHERE op = 'move'")
+        }.first!
+        let result = await w.op.undoMove(moveLog)
+        #expect(result.succeeded)
+
+        #expect(FileManager.default.fileExists(atPath: w.root.appending(path: "B/kick.wav").path))
+        #expect(!FileManager.default.fileExists(atPath: w.root.appending(path: "A/kick (2).wav").path))
+
+        let row = try await w.db.reader.read { try Row.fetchOne($0, sql: "SELECT relativePath, parentDir, filename, status FROM sample WHERE id = ?", arguments: [sample.id]) }!
+        #expect(row["relativePath"] == "B/kick.wav")
+        #expect(row["parentDir"] == "B")
+        #expect(row["status"] == "present")
+
+        let logs = try await w.db.reader.read { try FileOpLog.order(Column("id")).fetchAll($0) }
+        #expect(logs.first(where: { $0.op == "move" })?.undoneAt != nil)
+        #expect(logs.contains { $0.op == "undo move" && $0.succeeded })
+    }
+
+    @Test func undoMoveRefusesWhenAlreadyUndoneOrNotAMove() async throws {
+        let w = try await makeWorld()
+        let sample = try await groups(w.db)[0].members.first { $0.relativePath == "B/kick.wav" }!
+        _ = await w.op.perform(.trash, on: [sample])
+        let trashLog = try await w.db.reader.read { db in
+            try FileOpLog.fetchAll(db, sql: "SELECT * FROM file_op_log WHERE op = 'trash'")
+        }.first!
+        let result = await w.op.undoMove(trashLog)
+        #expect(!result.succeeded)
+        #expect(result.error != nil)
+    }
+
     @Test func moveOutsideRootMarksMissing() async throws {
         let w = try await makeWorld()
         let redundant = try await groups(w.db)[0].members[1]

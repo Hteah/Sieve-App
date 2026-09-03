@@ -13,7 +13,7 @@ struct DuplicateGroupsView: View {
     @State private var results: [FileOpResult]?
     @State private var lastOp: FileOperation?
     @State private var isWorking = false
-    @State private var showLog = false
+    @Environment(\.openWindow) private var openWindow
 
     struct PendingOp: Identifiable {
         let id = UUID()
@@ -49,7 +49,6 @@ struct DuplicateGroupsView: View {
         .task { await observe() }
         .sheet(item: $pending) { p in confirmSheet(p) }
         .sheet(isPresented: Binding(get: { results != nil }, set: { if !$0 { results = nil } })) { resultsSheet }
-        .sheet(isPresented: $showLog) { FileOpLogView() }
         .overlay { if isWorking { ProgressView("Working…").padding().background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8)) } }
     }
 
@@ -65,7 +64,7 @@ struct DuplicateGroupsView: View {
                 }
             }
             Spacer()
-            Button("Recent Operations…") { showLog = true }.controlSize(.small)
+            Button("Move History…") { openWindow(id: "move-history") }.controlSize(.small)
             Menu("All Groups") {
                 Button("Trash All Redundant Copies…") { stage(.trash, samples: allRedundant()) }
                 Button("Move All Redundant Copies To…") { chooseDestination { stage(.move(destination: $0), samples: allRedundant()) } }
@@ -262,35 +261,6 @@ struct DuplicateGroupsView: View {
             for try await g in observation.values(in: env.database.reader) { groups = g }
         } catch {
             env.report(error)
-        }
-    }
-}
-
-struct FileOpLogView: View {
-    @Environment(AppEnvironment.self) private var env
-    @Environment(\.dismiss) private var dismiss
-    @State private var entries: [FileOpLog] = []
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Recent File Operations").font(.headline)
-            Table(entries) {
-                TableColumn("When") { e in Text(e.performedAt.formatted(date: .abbreviated, time: .shortened)) }.width(140)
-                TableColumn("Op") { e in Text(e.op) }.width(50)
-                TableColumn("File") { e in Text(e.relativePath) }
-                TableColumn("Destination") { e in Text(e.destinationPath ?? "") }
-                TableColumn("Result") { e in
-                    Text(e.succeeded ? "ok" : (e.error ?? "failed")).foregroundStyle(e.succeeded ? Color.secondary : Color.red)
-                }.width(160)
-            }
-            HStack { Spacer(); Button("Close") { dismiss() }.keyboardShortcut(.defaultAction) }
-        }
-        .padding(20)
-        .frame(width: 760, height: 420)
-        .task {
-            entries = (try? await env.database.reader.read { db in
-                try FileOpLog.order(Column("performedAt").desc).limit(500).fetchAll(db)
-            }) ?? []
         }
     }
 }
