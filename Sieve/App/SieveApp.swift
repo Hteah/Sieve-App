@@ -17,9 +17,12 @@ struct SieveApp: App {
         WindowGroup {
             ContentView()
                 .environment(env)
-                .frame(minWidth: 840, minHeight: 600)
+                // Low floor so two windows fit side by side on a laptop (⌘N for a second window,
+                // sharing the one library). Hide the sidebar / inspector to go narrower still.
+                .frame(minWidth: 560, minHeight: 560)
                 .modifier(Themed())
         }
+        .defaultSize(width: 940, height: 660)
         .commands {
             SieveCommands(env: env)
         }
