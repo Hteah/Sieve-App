@@ -96,21 +96,24 @@ struct SidebarView: View {
 
             Section("Tags") {
                 ForEach(model.tags) { tag in
+                    let key = "tag:\(tag.id)"
                     HStack {
                         Label(tag.name, systemImage: "tag")
                         Spacer()
                         Text("\(tag.count)").foregroundStyle(.secondary).font(.caption)
+                    }
+                    .padding(.vertical, 1).padding(.horizontal, 3)
+                    .background { dropHighlight(key) }
+                    .overlay {
+                        tagDropCatcher(key: key) { rows in
+                            Task { try? await AnnotationStore(database: env.database).addTag(named: tag.name, to: rows) }
+                        }
                     }
                     .tag(LibraryScope.tag(tag.id))
                     .contextMenu {
                         Button("Delete Tag", role: .destructive) {
                             Task { try? await AnnotationStore(database: env.database).deleteTag(id: tag.id) }
                         }
-                    }
-                    .dropDestination(for: Int64.self) { ids, _ in
-                        let rows = model.rows.filter { ids.contains($0.id) }
-                        Task { try? await AnnotationStore(database: env.database).addTag(named: tag.name, to: rows) }
-                        return true
                     }
                 }
                 if model.tags.isEmpty {
@@ -121,17 +124,20 @@ struct SidebarView: View {
             Section("Quick Tags") {
                 let slots = QuickTags.load(quickTagSlotsJSON)
                 ForEach(0..<QuickTags.count, id: \.self) { i in
+                    let key = "qt:\(i)"
                     HStack {
                         QuickTagLabel(slots: slots, index: i)
                         Spacer()
                         Text("\(model.quickTagCounts[i])").foregroundStyle(.secondary).font(.caption)
                     }
-                    .tag(LibraryScope.quickTag(i))
-                    .dropDestination(for: Int64.self) { ids, _ in
-                        let rows = model.rows.filter { ids.contains($0.id) }
-                        Task { try? await AnnotationStore(database: env.database).addQuickTag(i, to: rows) }
-                        return true
+                    .padding(.vertical, 1).padding(.horizontal, 3)
+                    .background { dropHighlight(key) }
+                    .overlay {
+                        tagDropCatcher(key: key) { rows in
+                            Task { try? await AnnotationStore(database: env.database).addQuickTag(i, to: rows) }
+                        }
                     }
+                    .tag(LibraryScope.quickTag(i))
                     .contextMenu {
                         Button("Rename…") {
                             quickTagNameDraft = QuickTags.displayName(slots, i)
@@ -227,6 +233,28 @@ struct SidebarView: View {
                 return acceptDrop(ids, into: dest) { $0.rootId == rootId && $0.parentDir == subpath }
             }
         )
+    }
+
+    /// The tag / Quick Tag equivalent: drop the dragged rows onto a sidebar tag to apply it.
+    private func tagDropCatcher(key: String, apply: @escaping ([SampleRow]) -> Void) -> some View {
+        SampleDropCatcher(
+            onTargeted: { over in
+                if over { dropHoverKey = key } else if dropHoverKey == key { dropHoverKey = nil }
+            },
+            onDrop: { ids in
+                let set = Set(ids)
+                let rows = model.rows.filter { set.contains($0.id) }
+                guard !rows.isEmpty else { return false }
+                apply(rows)
+                return true
+            }
+        )
+    }
+
+    /// The accent-tinted background shown while a sample drag hovers a droppable row.
+    private func dropHighlight(_ key: String) -> some View {
+        RoundedRectangle(cornerRadius: 4)
+            .fill(dropHoverKey == key ? Color.accentColor.opacity(0.28) : .clear)
     }
 
     @ViewBuilder
@@ -382,10 +410,10 @@ struct SampleDropCatcher: NSViewRepresentable {
         override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
             let ok = !Self.ids(from: sender).isEmpty
             onTargeted?(ok)
-            return ok ? .move : []
+            return ok ? .copy : []
         }
         override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
-            Self.ids(from: sender).isEmpty ? [] : .move
+            Self.ids(from: sender).isEmpty ? [] : .copy
         }
         override func draggingExited(_ sender: NSDraggingInfo?) { onTargeted?(false) }
         override func draggingEnded(_ sender: NSDraggingInfo) { onTargeted?(false) }
