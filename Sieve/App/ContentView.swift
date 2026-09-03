@@ -128,7 +128,7 @@ struct ContentView: View {
             } label: {
                 Image(systemName: "waveform")
             }
-            .infoBubble("Open the wave editor window")
+            .infoBubble("Open the wave editor window (⌘E)")
             .padding(.trailing, 12)
 
             Button { toggleInspector() } label: {
