@@ -101,6 +101,20 @@ actor FileOperator {
         }
         defer { if destScoped, case .move(let dest) = op { dest.stopAccessingSecurityScopedResource() } }
 
+        // Root paths `reconcile` uses to decide whether a moved file landed inside a known root
+        // (→ re-path the row) or outside every root (→ mark missing). Start with the source roots,
+        // then add the root that contains a move destination even if it held no source file — so
+        // moving a sample from one indexed folder into another re-paths instead of orphaning it.
+        var indexedRootPaths: [(Int64, String)] = rootURLs.map { ($0.key, $0.value.standardizedFileURL.path) }
+        if case .move(let dest) = op {
+            let destPath = dest.standardizedFileURL.path
+            for (id, root) in rootsById where !indexedRootPaths.contains(where: { $0.0 == id }) {
+                guard root.isAvailable, let url = try? resolveRoot(root) else { continue }
+                let p = url.standardizedFileURL.path
+                if destPath == p || destPath.hasPrefix(p + "/") { indexedRootPaths.append((id, p)) }
+            }
+        }
+
         for sample in samples {
             var result = FileOpResult(sampleId: sample.id, filename: sample.filename, relativePath: sample.relativePath, succeeded: false)
             do {
@@ -129,7 +143,7 @@ actor FileOperator {
             results.append(result)
         }
 
-        await reconcile(op: op, results: results, samples: samples, rootURLs: rootURLs)
+        await reconcile(op: op, results: results, samples: samples, rootPaths: indexedRootPaths)
         return results
     }
 
@@ -148,11 +162,9 @@ actor FileOperator {
         }
     }
 
-    private func reconcile(op: FileOperation, results: [FileOpResult], samples: [SampleRow], rootURLs: [Int64: URL]) async {
+    private func reconcile(op: FileOperation, results: [FileOpResult], samples: [SampleRow], rootPaths: [(Int64, String)]) async {
         let byId = Dictionary(uniqueKeysWithValues: samples.map { ($0.id, $0) })
         let now = Date()
-        // Root paths for detecting moves that land inside a known root.
-        let rootPaths = rootURLs.map { ($0.key, $0.value.standardizedFileURL.path) }
         do {
             try await database.writer.write { db in
                 for r in results {

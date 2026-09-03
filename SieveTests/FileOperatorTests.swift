@@ -133,4 +133,48 @@ struct FileOperatorTests {
         let status = try await w.db.reader.read { try String.fetchOne($0, sql: "SELECT status FROM sample WHERE id = ?", arguments: [redundant.id]) }
         #expect(status == "missing")
     }
+
+    /// Moving a sample from one indexed root into a folder inside *another* indexed root re-paths
+    /// the row onto that root — it must not be marked missing just because the destination root
+    /// held no source file.
+    @Test func moveIntoAnotherRootRepaths() async throws {
+        let base = try Fixtures.tempDir()
+        let rootA = base.appending(path: "PackA")
+        let rootB = base.appending(path: "PackB")
+        for d in [rootA.appending(path: "Kicks"), rootB.appending(path: "Incoming")] {
+            try FileManager.default.createDirectory(at: d, withIntermediateDirectories: true)
+        }
+        try Fixtures.writeTone(to: rootA.appending(path: "Kicks/kick.wav"))
+
+        let db = try AppDatabase.inMemory()
+        let (sampleId, idB): (Int64, Int64) = try await db.writer.write { d in
+            var a = Root(name: "PackA", bookmarkData: Data(), lastResolvedPath: rootA.path, volumeUUID: nil)
+            try a.insert(d)
+            var b = Root(name: "PackB", bookmarkData: Data(), lastResolvedPath: rootB.path, volumeUUID: nil)
+            try b.insert(d)
+            let url = rootA.appending(path: "Kicks/kick.wav")
+            let v = try url.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey])
+            var s = Sample(rootId: a.id!, relativePath: "Kicks/kick.wav", fileSize: Int64(v.fileSize!), modifiedAt: v.contentModificationDate!)
+            s.audioHash = AudioAnalyzer.analyze(url: url).audioHash
+            s.indexedAt = Date()
+            try s.insert(d)
+            return (s.id!, b.id!)
+        }
+
+        let urls: [Int64: URL] = try await db.reader.read { d in
+            Dictionary(uniqueKeysWithValues: try Root.fetchAll(d).map { ($0.id!, $0.id! == idB ? rootB : rootA) })
+        }
+        let op = FileOperator(database: db, fs: FakeFS(trashDir: base.appending(path: "Trash")),
+                              resolveRoot: { urls[$0.id!]! })
+        let results = await op.perform(.move(destination: rootB.appending(path: "Incoming")), on: [
+            try await db.reader.read { try SampleRow.fetchOne($0, sql: "SELECT * FROM sample_with_annotation WHERE id = ?", arguments: [sampleId]) }!
+        ])
+
+        #expect(results[0].succeeded)
+        let row = try await db.reader.read { try Row.fetchOne($0, sql: "SELECT rootId, relativePath, parentDir, status FROM sample WHERE id = ?", arguments: [sampleId]) }!
+        #expect(row["rootId"] == idB)
+        #expect(row["relativePath"] == "Incoming/kick.wav")
+        #expect(row["parentDir"] == "Incoming")
+        #expect(row["status"] == "present")
+    }
 }
