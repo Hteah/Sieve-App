@@ -21,6 +21,7 @@ struct SampleListView: View {
     @State private var deferredWidth: CGFloat?
     @State private var convertRequest: ConvertRequest?
     @State private var moveRequest: MoveRequest?
+    @State private var deleteRequest: DeleteRequest?
     @State private var listDropTargeted = false
     // A tap on a row's waveform runs a DragGesture inside the Table cell, which knocks
     // keyboard focus off the Table — so the next Space press lands nowhere (or in the
@@ -36,6 +37,12 @@ struct SampleListView: View {
         let id = UUID()
         let rows: [SampleRow]
         let destination: URL
+    }
+
+    private struct DeleteRequest: Identifiable {
+        let id = UUID()
+        let rows: [SampleRow]
+        let permanent: Bool
     }
 
     // As the centre pane narrows, trailing columns drop off right-to-left until only the
@@ -56,8 +63,23 @@ struct SampleListView: View {
             FilterBar(model: model)
                 .themedChrome(palette)
             Rectangle().fill(palette.divider).frame(height: 1)
-            Table(model.rows, selection: $model.selection, sortOrder: sortComparators,
-                  columnCustomization: $columnCustomization) {
+            sampleTable
+                .onKeyPress(.delete, phases: .down, action: handleDeleteKey)
+                .sheet(item: $deleteRequest) { req in
+                    DeleteSamplesSheet(model: model, rows: req.rows, permanent: req.permanent)
+                }
+            Rectangle().fill(palette.divider).frame(height: 1)
+            statusBar
+                .themedChrome(palette)
+        }
+        .background(palette.surface)
+    }
+
+    /// The table and its full modifier stack, pulled out of `body` so each stays inside the
+    /// Swift type-checker's budget.
+    private var sampleTable: some View {
+        Table(model.rows, selection: $model.selection, sortOrder: sortComparators,
+              columnCustomization: $columnCustomization) {
                 TableColumn("Waveform") { row in
                     WaveformCell(row: row) { fraction in
                         model.selection = [row.id]
@@ -93,7 +115,7 @@ struct SampleListView: View {
                 }
                 .width(60).customizationID("rate")
                 TableColumn("Bits", value: \.bitsSortKey) { row in
-                    Text(row.bitDepth.map(String.init) ?? "–")
+                    Text(row.bitDepth.map { "\($0)" } ?? "–")
                 }
                 .width(32).customizationID("bits")
                 TableColumn("Rating", value: \.ratingSortKey) { row in
@@ -162,46 +184,7 @@ struct SampleListView: View {
                 applyResponsiveColumns(width: width)
             }
             .contextMenu(forSelectionType: Int64.self) { ids in
-                let rows = model.rows.filter { ids.contains($0.id) }
-                if let first = rows.first {
-                    Button("Reveal in Finder") { env.revealInFinder(first) }
-                    Button("Open in External Editor") { env.openInAudioEditor(first) }
-                        .help(env.audioEditorName.map { "Send this sample to \($0)" }
-                              ?? "Pick an external audio editor, then send this sample to it")
-                        .disabled(first.status != .present)
-                    Divider()
-                    Button(rows.allSatisfy { $0.isFavorite == true } ? "Remove from Favorites" : "Add to Favorites") {
-                        let fav = !(rows.allSatisfy { $0.isFavorite == true })
-                        Task { for r in rows { try? await AnnotationStore(database: env.database).setFavorite(fav, for: r) } }
-                    }
-                    Menu("Quick Tag") {
-                        let slots = QuickTags.load(quickTagSlotsJSON)
-                        ForEach(0..<QuickTags.count, id: \.self) { i in
-                            let bit = QuickTags.mask(i)
-                            let allOn = rows.allSatisfy { ($0.quickTags ?? 0) & bit != 0 }
-                            Button {
-                                Task { try? await AnnotationStore(database: env.database).toggleQuickTag(i, for: rows) }
-                            } label: {
-                                if allOn {
-                                    Label(QuickTags.displayName(slots, i), systemImage: "checkmark")
-                                } else {
-                                    QuickTagMenuLabel(slots: slots, index: i)
-                                }
-                            }
-                        }
-                        Divider()
-                        Button("None") {
-                            Task { for r in rows { try? await AnnotationStore(database: env.database).setQuickTagMask(0, for: r) } }
-                        }
-                    }
-                    Divider()
-                    Button("Move to Folder…") { chooseMoveDestination(for: rows) }
-                        .disabled(!rows.contains { $0.status == .present })
-                    Button("Convert Sample Rate / Bit Depth…") {
-                        convertRequest = ConvertRequest(rows: rows)
-                    }
-                    .disabled(!rows.contains { $0.status == .present })
-                }
+                rowMenu(for: model.rows.filter { ids.contains($0.id) })
             } primaryAction: { ids in
                 if let id = ids.first, let row = model.rows.first(where: { $0.id == id }) { env.preview(row) }
                 listFocused = true
@@ -264,11 +247,6 @@ struct SampleListView: View {
                 MoveToFolderSheet(model: model, rows: req.rows, destination: req.destination)
             }
             .themedSurface(palette)
-            Rectangle().fill(palette.divider).frame(height: 1)
-            statusBar
-                .themedChrome(palette)
-        }
-        .background(palette.surface)
     }
 
     /// Changes only when the sort field or direction changes, so the table rebuilds then and
@@ -401,6 +379,66 @@ struct SampleListView: View {
             ScanProgressView()
         }
         .padding(.horizontal, 10).padding(.vertical, 4)
+    }
+
+    /// ⌘⌫ moves the selected present rows to the Trash (through the same confirm sheet). Plain
+    /// Delete is ignored — too easy to hit by accident.
+    private func handleDeleteKey(_ press: KeyPress) -> KeyPress.Result {
+        guard press.modifiers.contains(.command) else { return .ignored }
+        let sel = model.rows.filter { model.selection.contains($0.id) && $0.status == .present }
+        guard !sel.isEmpty else { return .ignored }
+        deleteRequest = DeleteRequest(rows: sel, permanent: false)
+        return .handled
+    }
+
+    /// The row context menu. Extracted from `body` so the `Table` expression stays type-checkable.
+    @ViewBuilder
+    private func rowMenu(for rows: [SampleRow]) -> some View {
+        if let first = rows.first {
+            let hasPresent = rows.contains { $0.status == .present }
+            Button("Reveal in Finder") { env.revealInFinder(first) }
+            Button("Open in External Editor") { env.openInAudioEditor(first) }
+                .help(env.audioEditorName.map { "Send this sample to \($0)" }
+                      ?? "Pick an external audio editor, then send this sample to it")
+                .disabled(first.status != .present)
+            Divider()
+            Button(rows.allSatisfy { $0.isFavorite == true } ? "Remove from Favorites" : "Add to Favorites") {
+                let fav = !(rows.allSatisfy { $0.isFavorite == true })
+                Task { for r in rows { try? await AnnotationStore(database: env.database).setFavorite(fav, for: r) } }
+            }
+            Menu("Quick Tag") {
+                let slots = QuickTags.load(quickTagSlotsJSON)
+                ForEach(0..<QuickTags.count, id: \.self) { i in
+                    let allOn = rows.allSatisfy { ($0.quickTags ?? 0) & QuickTags.mask(i) != 0 }
+                    Button {
+                        Task { try? await AnnotationStore(database: env.database).toggleQuickTag(i, for: rows) }
+                    } label: {
+                        if allOn {
+                            Label(QuickTags.displayName(slots, i), systemImage: "checkmark")
+                        } else {
+                            QuickTagMenuLabel(slots: slots, index: i)
+                        }
+                    }
+                }
+                Divider()
+                Button("None") {
+                    Task { for r in rows { try? await AnnotationStore(database: env.database).setQuickTagMask(0, for: r) } }
+                }
+            }
+            Divider()
+            Button("Move to Folder…") { chooseMoveDestination(for: rows) }
+                .disabled(!hasPresent)
+            Button("Convert Sample Rate / Bit Depth…") { convertRequest = ConvertRequest(rows: rows) }
+                .disabled(!hasPresent)
+            Divider()
+            Button("Move to Trash") { deleteRequest = DeleteRequest(rows: rows, permanent: false) }
+                .keyboardShortcut(.delete, modifiers: .command)
+                .disabled(!hasPresent)
+            Button("Delete Permanently…", role: .destructive) {
+                deleteRequest = DeleteRequest(rows: rows, permanent: true)
+            }
+            .disabled(!hasPresent)
+        }
     }
 
     /// The folder this window's list is scoped to, if it's a single root or sub-folder — the drop
@@ -671,6 +709,104 @@ struct MoveToFolderSheet: View {
             var roots = Set(targets.map(\.rootId))
             if let destRoot = env.rootId(containing: destination) { roots.insert(destRoot) }
             for id in roots { await env.scanner.scan(rootId: id) }
+        }
+    }
+}
+
+/// Confirms and runs a Trash / Delete-Permanently on the list selection through the audited
+/// `FileOperator` (re-checks size+mtime, logs to `file_op_log`, reconciles the index). Trash
+/// leaves the row as `missing`; a permanent delete removes it. Missing / offline-volume rows
+/// are skipped.
+struct DeleteSamplesSheet: View {
+    @Environment(AppEnvironment.self) private var env
+    @Environment(\.dismiss) private var dismiss
+    @Bindable var model: LibraryViewModel
+    let rows: [SampleRow]
+    let permanent: Bool
+
+    @State private var phase: Phase = .confirm
+    @State private var results: [FileOpResult] = []
+
+    enum Phase { case confirm, working, done }
+
+    private var verb: String { permanent ? "Delete Permanently" : "Move to Trash" }
+
+    private var eligible: [SampleRow] {
+        rows.filter { $0.status == .present && (model.root(for: $0.rootId)?.isAvailable ?? false) }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            switch phase {
+            case .confirm: confirmView
+            case .working: ProgressView(permanent ? "Deleting…" : "Moving to Trash…")
+                    .frame(maxWidth: .infinity, minHeight: 80)
+            case .done: doneView
+            }
+        }
+        .padding(20)
+        .frame(width: 460)
+    }
+
+    private var confirmView: some View {
+        let total = eligible.reduce(0) { $0 + $1.fileSize }
+        return VStack(alignment: .leading, spacing: 12) {
+            Text("\(verb): \(eligible.count) file\(eligible.count == 1 ? "" : "s") (\(Fmt.bytes(total)))")
+                .font(.headline)
+            List(eligible) { s in
+                HStack {
+                    Text(s.filename)
+                    Spacer()
+                    Text("\(model.root(for: s.rootId)?.name ?? "") / \(s.parentDir)")
+                        .foregroundStyle(.secondary).font(.caption)
+                }
+            }
+            .frame(minHeight: 140, maxHeight: 300)
+            if permanent {
+                Label("This deletes the files from disk. It cannot be undone.", systemImage: "exclamationmark.triangle")
+                    .foregroundStyle(.red)
+            } else {
+                Text("Files go to the Trash (Finder\u{2019}s Put Back restores them). The samples leave your library; ratings, tags and notes are kept.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            HStack {
+                Spacer()
+                Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
+                Button(verb, role: .destructive) { run() }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(eligible.isEmpty)
+            }
+        }
+    }
+
+    private var doneView: some View {
+        let failed = results.filter { !$0.succeeded }
+        return VStack(alignment: .leading, spacing: 12) {
+            Text(failed.isEmpty
+                 ? "\(permanent ? "Deleted" : "Trashed") \(results.count) file\(results.count == 1 ? "" : "s")"
+                 : "\(results.count - failed.count) done, \(failed.count) failed")
+                .font(.headline)
+            if !failed.isEmpty {
+                List(failed) { f in
+                    VStack(alignment: .leading) {
+                        Text(f.filename)
+                        Text(f.error ?? "").font(.caption).foregroundStyle(.red)
+                    }
+                }
+                .frame(minHeight: 100, maxHeight: 220)
+            }
+            HStack { Spacer(); Button("Done") { dismiss() }.keyboardShortcut(.defaultAction) }
+        }
+    }
+
+    private func run() {
+        phase = .working
+        let targets = eligible
+        Task {
+            let op = FileOperator(database: env.database, bookmarks: env.bookmarks)
+            results = await op.perform(permanent ? .deletePermanently : .trash, on: targets)
+            phase = .done
+            for id in Set(targets.map(\.rootId)) { await env.scanner.scan(rootId: id) }
         }
     }
 }

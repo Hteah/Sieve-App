@@ -75,17 +75,31 @@ struct FileOperatorTests {
         #expect(g[0].wastedBytes == g[0].members[1].fileSize)
     }
 
-    @Test func trashMarksMissingAndLogs() async throws {
+    @Test func trashRemovesRowAndLogs() async throws {
         let w = try await makeWorld()
         let redundant = try await groups(w.db)[0].members.first { $0.relativePath == "B/kick.wav" }!
         let results = await w.op.perform(.trash, on: [redundant])
         #expect(results.count == 1 && results[0].succeeded)
         #expect(w.fs.trashed.count == 1)
         #expect(!FileManager.default.fileExists(atPath: w.root.appending(path: "B/kick.wav").path))
-        let status = try await w.db.reader.read { try String.fetchOne($0, sql: "SELECT status FROM sample WHERE id = ?", arguments: [redundant.id]) }
-        #expect(status == "missing")
+        let count = try await w.db.reader.read { try Int.fetchOne($0, sql: "SELECT count(*) FROM sample WHERE id = ?", arguments: [redundant.id]) }
+        #expect(count == 0)
         let logs = try await w.db.reader.read { try FileOpLog.fetchAll($0) }
         #expect(logs.count == 1 && logs[0].op == "trash" && logs[0].succeeded)
+        #expect(try await groups(w.db).isEmpty)
+    }
+
+    @Test func deletePermanentlyRemovesFileAndRow() async throws {
+        let w = try await makeWorld()
+        let victim = try await groups(w.db)[0].members.first { $0.relativePath == "B/kick.wav" }!
+        let results = await w.op.perform(.deletePermanently, on: [victim])
+        #expect(results.count == 1 && results[0].succeeded)
+        #expect(!FileManager.default.fileExists(atPath: w.root.appending(path: "B/kick.wav").path))
+        let count = try await w.db.reader.read { try Int.fetchOne($0, sql: "SELECT count(*) FROM sample WHERE id = ?", arguments: [victim.id]) }
+        #expect(count == 0)
+        let logs = try await w.db.reader.read { try FileOpLog.fetchAll($0) }
+        #expect(logs.count == 1 && logs[0].op == "delete" && logs[0].succeeded)
+        // The duplicate group collapses now that one of the two copies is gone.
         #expect(try await groups(w.db).isEmpty)
     }
 

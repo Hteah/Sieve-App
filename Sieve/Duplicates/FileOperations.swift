@@ -266,19 +266,28 @@ actor FileOperator {
                                         destinationPath: r.destination?.path, performedAt: now, succeeded: r.succeeded, error: r.error)
                     try log.insert(db)
                     guard r.succeeded else { continue }
-                    if let dest = r.destination?.standardizedFileURL.path,
-                       let (rootId, rootPath) = rootPaths.first(where: { dest.hasPrefix($0.1 + "/") }) {
-                        var rel = String(dest.dropFirst(rootPath.count))
-                        if rel.hasPrefix("/") { rel.removeFirst() }
-                        let comps = rel.split(separator: "/")
-                        let parent = comps.dropLast().joined(separator: "/")
-                        let name = comps.last.map(String.init) ?? rel
-                        // If a stale row already exists at the destination, drop it first.
-                        try db.execute(sql: "DELETE FROM sample WHERE rootId = ? AND relativePath = ? AND id != ?", arguments: [rootId, rel, s.id])
-                        try db.execute(sql: "UPDATE sample SET rootId = ?, relativePath = ?, parentDir = ?, filename = ?, lastSeenAt = ? WHERE id = ?",
-                                       arguments: [rootId, rel, parent, name, now, s.id])
-                    } else {
-                        try db.execute(sql: "UPDATE sample SET status = 'missing' WHERE id = ?", arguments: [s.id])
+                    switch op {
+                    case .move:
+                        if let dest = r.destination?.standardizedFileURL.path,
+                           let (rootId, rootPath) = rootPaths.first(where: { dest.hasPrefix($0.1 + "/") }) {
+                            var rel = String(dest.dropFirst(rootPath.count))
+                            if rel.hasPrefix("/") { rel.removeFirst() }
+                            let comps = rel.split(separator: "/")
+                            let parent = comps.dropLast().joined(separator: "/")
+                            let name = comps.last.map(String.init) ?? rel
+                            // If a stale row already exists at the destination, drop it first.
+                            try db.execute(sql: "DELETE FROM sample WHERE rootId = ? AND relativePath = ? AND id != ?", arguments: [rootId, rel, s.id])
+                            try db.execute(sql: "UPDATE sample SET rootId = ?, relativePath = ?, parentDir = ?, filename = ?, lastSeenAt = ? WHERE id = ?",
+                                           arguments: [rootId, rel, parent, name, now, s.id])
+                        } else {
+                            // Moved outside every indexed root — the file is fine, just no longer ours.
+                            try db.execute(sql: "UPDATE sample SET status = 'missing' WHERE id = ?", arguments: [s.id])
+                        }
+                    case .trash, .deletePermanently:
+                        // The file left its folder; drop the row so it leaves the list. The
+                        // hash-keyed annotation stays, so re-indexing the same audio (or a Finder
+                        // "Put Back" followed by a rescan) re-attaches the rating/tags/notes.
+                        try db.execute(sql: "DELETE FROM sample WHERE id = ?", arguments: [s.id])
                     }
                 }
             }
