@@ -482,23 +482,19 @@ struct FilterBar: View {
     @Bindable var model: LibraryViewModel
 
     var body: some View {
-        // ViewThatFits keeps the bar right-aligned when there's room, and falls back to a
-        // horizontally scrollable row when the centre pane is narrow — so the filter bar
-        // never forces the window wider while a divider is dragged.
+        // Falls back to a horizontally scrollable row when the centre pane is too narrow for the
+        // controls, so the filter bar never forces the window wider while a divider is dragged.
+        // Sorting lives on the table column headers, not here.
         ViewThatFits(in: .horizontal) {
             HStack(spacing: 10) {
                 controls
-                Spacer(minLength: 8)
-                sortPicker
+                Spacer(minLength: 0)
             }
             .padding(8)
 
             ScrollView(.horizontal) {
-                HStack(spacing: 10) {
-                    controls
-                    sortPicker
-                }
-                .padding(8)
+                HStack(spacing: 10) { controls }
+                    .padding(8)
             }
             .scrollIndicators(.hidden)
         }
@@ -532,29 +528,6 @@ struct FilterBar: View {
             Text(model.filter.extensions.isEmpty ? "All formats" : model.filter.extensions.sorted().map { $0.uppercased() }.joined(separator: ","))
         }
         .frame(width: 130)
-    }
-
-    private var sortPicker: some View {
-        HStack(spacing: 4) {
-            Picker("Sort", selection: sortBinding) {
-                ForEach(SampleSort.allCases) { Text($0.label).tag($0) }
-            }
-            .frame(width: 130)
-            Button {
-                model.filter.sortAscending.toggle()
-            } label: {
-                Image(systemName: model.filter.sortAscending ? "arrow.up" : "arrow.down")
-            }
-            .buttonStyle(.borderless)
-            .help(model.filter.sortAscending ? "Ascending — click to reverse" : "Descending — click to reverse")
-        }
-    }
-
-    private var sortBinding: Binding<SampleSort> {
-        Binding(
-            get: { model.filter.sort },
-            set: { model.filter.select($0) }
-        )
     }
 }
 
