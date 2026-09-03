@@ -12,6 +12,24 @@ struct SidebarView: View {
     @State private var quickTagRenameSlot: Int?
     @State private var quickTagIconSlot: Int?
     @State private var quickTagNameDraft = ""
+    @State private var moveHere: MoveHereRequest?
+
+    private struct MoveHereRequest: Identifiable {
+        let id = UUID()
+        let rows: [SampleRow]
+        let destination: URL
+    }
+
+    /// List rows currently selected that can actually be moved: present, on an available root.
+    private var movableSelection: [SampleRow] {
+        model.rows.filter { model.selection.contains($0.id) && $0.status == .present }
+    }
+
+    private func stageMoveHere(into destination: URL) {
+        let rows = movableSelection
+        guard !rows.isEmpty else { return }
+        moveHere = MoveHereRequest(rows: rows, destination: destination)
+    }
 
     private enum GroupSheet: Identifiable {
         case create(assignRoot: Int64?)
@@ -146,6 +164,9 @@ struct SidebarView: View {
             Button("Cancel", role: .cancel) { groupSheet = nil }
             Button(sheet.isRename ? "Rename" : "Create") { commitGroupSheet(sheet) }
         }
+        .sheet(item: $moveHere) { req in
+            MoveToFolderSheet(model: model, rows: req.rows, destination: req.destination)
+        }
     }
 
     // MARK: Rows
@@ -157,6 +178,14 @@ struct SidebarView: View {
                 OutlineGroup(model.folderTrees[id] ?? [], children: \.childrenOrNil) { node in
                     Label(node.name, systemImage: "folder")
                         .tag(LibraryScope.folder(rootId: node.rootId, parentDir: node.path))
+                        .contextMenu {
+                            Button("Move Selected Samples Here") {
+                                if let root = env.rootURL(for: node.rootId) {
+                                    stageMoveHere(into: root.appending(path: node.path))
+                                }
+                            }
+                            .disabled(movableSelection.isEmpty)
+                        }
                 }
             } label: {
                 rootLabel(root, id: id)
@@ -184,6 +213,10 @@ struct SidebarView: View {
                 if let url = env.rootURL(for: id) { withSecurityScope(url) { NSWorkspace.shared.activateFileViewerSelecting([url]) } }
             }
             Button("Relink…") { Task { await env.relinkRootViaPanel(rootId: id) } }
+            Button("Move Selected Samples Here") {
+                if let url = env.rootURL(for: id) { stageMoveHere(into: url) }
+            }
+            .disabled(movableSelection.isEmpty)
             Divider()
             Menu("Move to Group") {
                 ForEach(model.groups) { group in
