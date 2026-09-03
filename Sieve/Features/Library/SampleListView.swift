@@ -4,7 +4,6 @@ import UniformTypeIdentifiers
 
 struct SampleListView: View {
     @Environment(AppEnvironment.self) private var env
-    @Environment(\.openWindow) private var openWindow
     @Environment(\.palette) private var palette
     @Bindable var model: LibraryViewModel
     /// Set by `ContentView` while a sidebar/inspector toggle animates: recalc columns only once
@@ -19,6 +18,7 @@ struct SampleListView: View {
     /// Latest list width seen while a pane toggle is animating; applied once the toggle settles.
     @State private var deferredWidth: CGFloat?
     @State private var convertRequest: ConvertRequest?
+    @State private var moveRequest: MoveRequest?
     // A tap on a row's waveform runs a DragGesture inside the Table cell, which knocks
     // keyboard focus off the Table — so the next Space press lands nowhere (or in the
     // search field). Re-assert focus here after any row/waveform interaction.
@@ -27,6 +27,12 @@ struct SampleListView: View {
     private struct ConvertRequest: Identifiable {
         let id = UUID()
         let rows: [SampleRow]
+    }
+
+    private struct MoveRequest: Identifiable {
+        let id = UUID()
+        let rows: [SampleRow]
+        let destination: URL
     }
 
     // As the centre pane narrows, trailing columns drop off right-to-left until only the
@@ -155,17 +161,11 @@ struct SampleListView: View {
             .contextMenu(forSelectionType: Int64.self) { ids in
                 let rows = model.rows.filter { ids.contains($0.id) }
                 if let first = rows.first {
-                    Button("Play") { env.preview(first) }
                     Button("Reveal in Finder") { env.revealInFinder(first) }
                     Button("Open in External Editor") { env.openInAudioEditor(first) }
                         .help(env.audioEditorName.map { "Send this sample to \($0)" }
                               ?? "Pick an external audio editor, then send this sample to it")
                         .disabled(first.status != .present)
-                    Button("Open in Wave Editor") {
-                        env.editor.noteListSelection(first)
-                        openWindow(id: "audio-editor")
-                    }
-                    .disabled(first.status != .present)
                     Divider()
                     Button(rows.allSatisfy { $0.isFavorite == true } ? "Remove from Favorites" : "Add to Favorites") {
                         let fav = !(rows.allSatisfy { $0.isFavorite == true })
@@ -192,6 +192,8 @@ struct SampleListView: View {
                         }
                     }
                     Divider()
+                    Button("Move to Folder…") { chooseMoveDestination(for: rows) }
+                        .disabled(!rows.contains { $0.status == .present })
                     Button("Convert Sample Rate / Bit Depth…") {
                         convertRequest = ConvertRequest(rows: rows)
                     }
@@ -239,6 +241,9 @@ struct SampleListView: View {
             }
             .sheet(item: $convertRequest) { req in
                 BatchConvertSheet(model: model, rows: req.rows)
+            }
+            .sheet(item: $moveRequest) { req in
+                MoveToFolderSheet(model: model, rows: req.rows, destination: req.destination)
             }
             .themedSurface(palette)
             Rectangle().fill(palette.divider).frame(height: 1)
@@ -378,6 +383,20 @@ struct SampleListView: View {
             ScanProgressView()
         }
         .padding(.horizontal, 10).padding(.vertical, 4)
+    }
+
+    /// Folder picker for "Move to Folder…"; on OK, stages a confirmation sheet.
+    private func chooseMoveDestination(for rows: [SampleRow]) {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = true
+        panel.prompt = "Move Here"
+        panel.message = "Choose a folder to move the selected samples into."
+        if let last = env.bookmarks.lastMoveDestination() { panel.directoryURL = last }
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        env.bookmarks.rememberMoveDestination(url)
+        moveRequest = MoveRequest(rows: rows, destination: url)
     }
 }
 
@@ -535,5 +554,97 @@ struct FilterBar: View {
             get: { model.filter.sort },
             set: { model.filter.select($0) }
         )
+    }
+}
+
+/// Confirms and runs a "Move to Folder…" on the list selection, through the same audited
+/// `FileOperator` the duplicates view uses: it re-checks each file, moves it, logs the op, and
+/// re-paths the sample row if the destination is inside an indexed folder (so ratings/tags/notes
+/// follow). Files that are missing or on an unmounted volume are skipped.
+struct MoveToFolderSheet: View {
+    @Environment(AppEnvironment.self) private var env
+    @Environment(\.dismiss) private var dismiss
+    @Bindable var model: LibraryViewModel
+    let rows: [SampleRow]
+    let destination: URL
+
+    @State private var phase: Phase = .confirm
+    @State private var results: [FileOpResult] = []
+
+    enum Phase { case confirm, working, done }
+
+    private var eligible: [SampleRow] {
+        rows.filter { $0.status == .present && (model.root(for: $0.rootId)?.isAvailable ?? false) }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            switch phase {
+            case .confirm: confirmView
+            case .working: ProgressView("Moving…").frame(maxWidth: .infinity, minHeight: 80)
+            case .done: doneView
+            }
+        }
+        .padding(20)
+        .frame(width: 460)
+    }
+
+    private var confirmView: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Move \(eligible.count) file\(eligible.count == 1 ? "" : "s")").font(.headline)
+            Text("to \u{201C}\(destination.lastPathComponent)\u{201D}")
+                .font(.callout).foregroundStyle(.secondary)
+                .lineLimit(1).truncationMode(.middle)
+            List(eligible) { s in
+                HStack {
+                    Text(s.filename)
+                    Spacer()
+                    Text("\(model.root(for: s.rootId)?.name ?? "") / \(s.parentDir)")
+                        .foregroundStyle(.secondary).font(.caption)
+                }
+            }
+            .frame(minHeight: 140, maxHeight: 300)
+            Text("Files are moved on disk. Ratings, tags and notes follow. A name clash gets a \u{201C} (2)\u{201D} suffix.")
+                .font(.caption).foregroundStyle(.secondary)
+            HStack {
+                Spacer()
+                Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
+                Button("Move") { run() }.keyboardShortcut(.defaultAction).disabled(eligible.isEmpty)
+            }
+        }
+    }
+
+    private var doneView: some View {
+        let failed = results.filter { !$0.succeeded }
+        return VStack(alignment: .leading, spacing: 12) {
+            Text(failed.isEmpty
+                 ? "Moved \(results.count) file\(results.count == 1 ? "" : "s")"
+                 : "\(results.count - failed.count) moved, \(failed.count) failed")
+                .font(.headline)
+            if !failed.isEmpty {
+                List(failed) { f in
+                    VStack(alignment: .leading) {
+                        Text(f.filename)
+                        Text(f.error ?? "").font(.caption).foregroundStyle(.red)
+                    }
+                }
+                .frame(minHeight: 100, maxHeight: 220)
+            }
+            HStack { Spacer(); Button("Done") { dismiss() }.keyboardShortcut(.defaultAction) }
+        }
+    }
+
+    private func run() {
+        phase = .working
+        let targets = eligible
+        Task {
+            let op = FileOperator(database: env.database, bookmarks: env.bookmarks)
+            results = await op.perform(.move(destination: destination), on: targets)
+            phase = .done
+            // Rescan the folders we moved out of, plus the destination folder if it's indexed.
+            var roots = Set(targets.map(\.rootId))
+            if let destRoot = env.rootId(containing: destination) { roots.insert(destRoot) }
+            for id in roots { await env.scanner.scan(rootId: id) }
+        }
     }
 }

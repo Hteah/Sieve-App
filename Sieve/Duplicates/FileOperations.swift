@@ -59,7 +59,8 @@ enum FileOpError: Error, LocalizedError {
     }
 }
 
-/// Trashes / deletes / moves samples on disk, then reconciles the index. Only ever invoked from the duplicates view.
+/// Trashes / deletes / moves samples on disk, then reconciles the index. Invoked from the
+/// duplicates view (trash / move redundant copies) and from the list's "Move to Folder…".
 actor FileOperator {
     private let database: AppDatabase
     private let fs: any FileSystemOps
