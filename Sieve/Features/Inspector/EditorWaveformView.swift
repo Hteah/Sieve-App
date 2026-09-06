@@ -303,48 +303,74 @@ struct EditorWaveformView: View {
             let mid = top + laneHeight / 2
             let half = laneHeight / 2 - 1
 
-            var wave = Path()
-            for px in 0..<columns {
-                let f0 = min(end - 1, start + Int(Double(px) * spp))
-                let f1 = min(end, max(f0 + 1, start + Int(Double(px + 1) * spp)))
-                var lo: Float = 0
-                var hi: Float = 0
-                if let level, c < level.minMax.count, !level.minMax[c].isEmpty {
-                    let bins = level.minMax[c]
-                    let b0 = min(bins.count - 1, f0 / level.stride)
-                    let b1 = min(bins.count - 1, (f1 - 1) / level.stride)
-                    lo = bins[b0].x; hi = bins[b0].y
-                    if b1 > b0 {
-                        for b in (b0 + 1)...b1 {
-                            lo = min(lo, bins[b].x)
-                            hi = max(hi, bins[b].y)
+            if spp < 1, c < clip.channels.count, !clip.channels[c].isEmpty {
+                // Zoomed in past one sample per pixel: a min/max envelope has nothing left to
+                // show -- it flattens into a sample-and-hold staircase. Trace the actual sample
+                // values instead, and past ~5 px/sample dot each one.
+                let ch = clip.channels[c]
+                let showDots = spp < 0.2
+                let firstF = max(0, start)
+                let lastF = min(ch.count - 1, start + Int(Double(span).rounded(.up)) + 1)
+                var line = Path()
+                var dots = Path()
+                var startedLine = false
+                if lastF >= firstF {
+                    for f in firstF...lastF {
+                        var v = ch[f]
+                        if let pr = previewRange, pr.contains(f) { v = max(-1, min(1, v * previewGain)) }
+                        let x = xForFrame(f)
+                        let y = mid - CGFloat(v) * half
+                        if startedLine { line.addLine(to: CGPoint(x: x, y: y)) }
+                        else { line.move(to: CGPoint(x: x, y: y)); startedLine = true }
+                        if showDots { dots.addEllipse(in: CGRect(x: x - 2, y: y - 2, width: 4, height: 4)) }
+                    }
+                }
+                ctx.stroke(line, with: .color(accent), lineWidth: 1.6)
+                if showDots { ctx.fill(dots, with: .color(accent)) }
+            } else {
+                var wave = Path()
+                for px in 0..<columns {
+                    let f0 = min(end - 1, start + Int(Double(px) * spp))
+                    let f1 = min(end, max(f0 + 1, start + Int(Double(px + 1) * spp)))
+                    var lo: Float = 0
+                    var hi: Float = 0
+                    if let level, c < level.minMax.count, !level.minMax[c].isEmpty {
+                        let bins = level.minMax[c]
+                        let b0 = min(bins.count - 1, f0 / level.stride)
+                        let b1 = min(bins.count - 1, (f1 - 1) / level.stride)
+                        lo = bins[b0].x; hi = bins[b0].y
+                        if b1 > b0 {
+                            for b in (b0 + 1)...b1 {
+                                lo = min(lo, bins[b].x)
+                                hi = max(hi, bins[b].y)
+                            }
+                        }
+                    } else if c < clip.channels.count, !clip.channels[c].isEmpty {
+                        // No pyramid yet (just-loaded / mid-edit): scan raw, but sub-sample when a
+                        // column covers a huge span so this stays smooth until the mip lands.
+                        let ch = clip.channels[c]
+                        let a0 = min(max(0, f0), ch.count - 1)
+                        let a1 = min(max(a0 + 1, f1), ch.count)
+                        let step = max(1, (a1 - a0) / 2048)
+                        lo = ch[a0]; hi = ch[a0]
+                        var i = a0 + step
+                        while i < a1 {
+                            let v = ch[i]
+                            if v < lo { lo = v }
+                            if v > hi { hi = v }
+                            i += step
                         }
                     }
-                } else if c < clip.channels.count, !clip.channels[c].isEmpty {
-                    // No pyramid yet (just-loaded / mid-edit): scan raw, but sub-sample when a
-                    // column covers a huge span so this stays smooth until the mip lands.
-                    let ch = clip.channels[c]
-                    let a0 = min(max(0, f0), ch.count - 1)
-                    let a1 = min(max(a0 + 1, f1), ch.count)
-                    let step = max(1, (a1 - a0) / 2048)
-                    lo = ch[a0]; hi = ch[a0]
-                    var i = a0 + step
-                    while i < a1 {
-                        let v = ch[i]
-                        if v < lo { lo = v }
-                        if v > hi { hi = v }
-                        i += step
+                    if let pr = previewRange, f1 > pr.lowerBound, f0 < pr.upperBound {
+                        lo = max(-1, min(1, lo * previewGain))
+                        hi = max(-1, min(1, hi * previewGain))
                     }
+                    let x = CGFloat(px) + 0.5
+                    wave.move(to: CGPoint(x: x, y: mid - CGFloat(hi) * half))
+                    wave.addLine(to: CGPoint(x: x, y: mid - CGFloat(lo) * half))
                 }
-                if let pr = previewRange, f1 > pr.lowerBound, f0 < pr.upperBound {
-                    lo = max(-1, min(1, lo * previewGain))
-                    hi = max(-1, min(1, hi * previewGain))
-                }
-                let x = CGFloat(px) + 0.5
-                wave.move(to: CGPoint(x: x, y: mid - CGFloat(hi) * half))
-                wave.addLine(to: CGPoint(x: x, y: mid - CGFloat(lo) * half))
+                ctx.stroke(wave, with: .color(accent), lineWidth: 1)
             }
-            ctx.stroke(wave, with: .color(accent), lineWidth: 1)
 
             var zero = Path()
             zero.move(to: CGPoint(x: 0, y: mid))
