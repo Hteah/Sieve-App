@@ -3,9 +3,16 @@ import Foundation
 import Observation
 import os
 
-/// Plays an in-memory `AudioClip` (optionally a sub-range, optionally looping) for the inspector
-/// editor. Its own engine, separate from `PreviewPlayer`, so list preview and editing don't
-/// fight over one player node.
+/// How the editor's loop button repeats the playback range.
+enum EditorLoopMode: Equatable {
+    case off        // play once
+    case loop       // repeat head-to-tail
+    case pingPong   // forward, then backward, forever
+}
+
+/// Plays an in-memory `AudioClip` (optionally a sub-range, optionally looping — plain or
+/// ping-pong) for the inspector editor. Its own engine, separate from `PreviewPlayer`, so list
+/// preview and editing don't fight over one player node.
 @MainActor
 @Observable
 final class AudioEditorPlayer {
@@ -14,8 +21,10 @@ final class AudioEditorPlayer {
     private var currentFormat: AVAudioFormat?
     private var timer: Timer?
     private var rangeStart = 0        // first clip frame of what was scheduled
-    private var scheduledFrames = 0
+    private var scheduledFrames = 0   // length of the scheduled buffer (2*forwardFrames-2 when ping-pong)
+    private var forwardFrames = 0     // length of the real range; == scheduledFrames unless ping-pong
     private var isLooping = false
+    private var isPingPong = false
     private var clipSampleRate: Double = 44_100
     /// Playhead is driven by the node's render clock (`playerTime.sampleTime`) so it stays in
     /// sync with the audio — important for short selections / loops where engine start-up
@@ -37,24 +46,30 @@ final class AudioEditorPlayer {
 
     init() { engine.attach(node) }
 
-    /// Plays `range` of `clip` (whole clip when nil). `looping` reschedules the same buffer seamlessly.
-    func play(_ clip: AudioClip, range: Range<Int>?, looping: Bool) {
+    /// Plays `range` of `clip` (whole clip when nil). `.loop` reschedules the same buffer
+    /// seamlessly; `.pingPong` schedules a forward+reversed buffer and loops that, so playback
+    /// bounces back and forth. Ranges under 3 frames fall back to a plain loop.
+    func play(_ clip: AudioClip, range: Range<Int>?, loopMode: EditorLoopMode) {
         stop()
         let r = clip.clampedRange(range)
+        let loops = loopMode != .off
+        let pingPong = loopMode == .pingPong && r.count >= 3
         guard r.count > 0, clip.channelCount > 0,
-              let buffer = Self.makeBuffer(clip, range: r) else { return }
+              let buffer = Self.makeBuffer(clip, range: r, pingPong: pingPong) else { return }
         rangeStart = r.lowerBound
-        scheduledFrames = r.count
-        isLooping = looping
+        forwardFrames = r.count
+        scheduledFrames = Int(buffer.frameLength)
+        isLooping = loops
+        isPingPong = pingPong
         clipSampleRate = clip.sampleRate
         playToken &+= 1
         let token = playToken
         do {
             try prepareEngine(format: buffer.format)
-            let options: AVAudioPlayerNodeBufferOptions = looping ? [.loops, .interrupts] : [.interrupts]
+            let options: AVAudioPlayerNodeBufferOptions = loops ? [.loops, .interrupts] : [.interrupts]
             node.scheduleBuffer(buffer, at: nil, options: options,
                                 completionCallbackType: .dataPlayedBack) { [weak self] _ in
-                Task { @MainActor in self?.bufferFinished(token: token, looping: looping) }
+                Task { @MainActor in self?.bufferFinished(token: token, looping: loops) }
             }
             if !engine.isRunning { try startEngineRecovering(format: buffer.format) }
             node.play()
@@ -73,6 +88,7 @@ final class AudioEditorPlayer {
         node.stop()
         timer?.invalidate(); timer = nil
         isPlaying = false
+        isPingPong = false
         playStartDate = nil
         nodeAnchor = nil
     }
@@ -154,8 +170,10 @@ final class AudioEditorPlayer {
         }
 
         // Wrap while looping; otherwise clamp so a tick at the boundary can't snap the
-        // playhead back to the range start before `bufferFinished` lands.
-        let played = isLooping ? elapsed % max(1, scheduledFrames) : min(elapsed, scheduledFrames)
+        // playhead back to the range start before `bufferFinished` lands. In ping-pong the
+        // scheduled buffer is forward+reversed, so fold the second half back onto the range.
+        let raw = isLooping ? elapsed % max(1, scheduledFrames) : min(elapsed, scheduledFrames)
+        let played = (isPingPong && raw >= forwardFrames) ? (2 * forwardFrames - 2 - raw) : raw
         playheadFrame = rangeStart + played
         // End on the .dataPlayedBack callback, which tracks real audio. Only fall back to the
         // clock well past the end (a quarter second), so this can't pre-empt playback that is
@@ -165,18 +183,29 @@ final class AudioEditorPlayer {
         }
     }
 
-    private static func makeBuffer(_ clip: AudioClip, range r: Range<Int>) -> AVAudioPCMBuffer? {
+    /// Builds the buffer to schedule. `pingPong` appends the range reversed with both endpoints
+    /// dropped (`f0 … f(n-1) f(n-2) … f1`, length `2n-2`), so looping it plays the range forward
+    /// then backward with no repeated sample at the turnarounds. Caller guarantees `r.count >= 3`
+    /// when `pingPong` is true.
+    private static func makeBuffer(_ clip: AudioClip, range r: Range<Int>, pingPong: Bool) -> AVAudioPCMBuffer? {
         let channels = max(1, clip.channelCount)
+        let frames = pingPong ? 2 * r.count - 2 : r.count
         guard let format = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: clip.sampleRate,
                                          channels: AVAudioChannelCount(channels), interleaved: false),
-              let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(r.count)) else {
+              let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(frames)) else {
             return nil
         }
-        buffer.frameLength = AVAudioFrameCount(r.count)
+        buffer.frameLength = AVAudioFrameCount(frames)
         let dst = buffer.floatChannelData!
         for c in 0..<clip.channelCount {
             clip.channels[c].withUnsafeBufferPointer { src in
-                dst[c].update(from: src.baseAddress! + r.lowerBound, count: r.count)
+                let base = src.baseAddress! + r.lowerBound
+                dst[c].update(from: base, count: r.count)
+                if pingPong {
+                    var w = r.count
+                    var i = r.count - 2
+                    while i >= 1 { dst[c][w] = base[i]; w += 1; i -= 1 }
+                }
             }
         }
         return buffer

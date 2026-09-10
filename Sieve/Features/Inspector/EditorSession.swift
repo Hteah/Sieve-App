@@ -32,8 +32,17 @@ final class EditorSession {
     }
     /// Pending gain (dB) for the inline amplify slider — a live visual preview until applied.
     private(set) var previewGainDb: Float = 0
-    var looping = false {
-        didSet { if oldValue != looping, player.isPlaying { startPlayback() } }
+    var loopMode: EditorLoopMode = .off {
+        didSet { if oldValue != loopMode, player.isPlaying { startPlayback() } }
+    }
+
+    /// Advances the loop button through off → loop → ping-pong → off.
+    func cycleLoopMode() {
+        loopMode = switch loopMode {
+        case .off: .loop
+        case .loop: .pingPong
+        case .pingPong: .off
+        }
     }
     private(set) var isBusy = false
     private(set) var loadError: String?
@@ -350,7 +359,7 @@ final class EditorSession {
         }
         guard playbackRange.count > 0 else { return }
         env.player.stop()
-        player.play(clip, range: playbackRange, looping: looping)
+        player.play(clip, range: playbackRange, loopMode: loopMode)
     }
 
     /// Stops playback, parking the cursor where the playhead was so Play resumes from there.

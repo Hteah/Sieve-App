@@ -124,6 +124,14 @@ struct AudioEditorView: View {
         }
     }
 
+    private var loopHelp: String {
+        switch session.loopMode {
+        case .off:      return session.hasSelection ? "Loop the selection" : "Loop"
+        case .loop:     return "Looping — click for ping-pong"
+        case .pingPong: return "Ping-pong loop — click to turn off"
+        }
+    }
+
     private var readout: String {
         let rate = Fmt.sampleRate(session.sampleRate)
         let total = Fmt.duration(session.duration)
@@ -177,11 +185,17 @@ struct AudioEditorView: View {
             }
             .infoBubble(session.hasSelection ? "Play the selection" : "Play from the cursor")
             .modifier(SpaceToToggle(enabled: isPopOut))
-            Toggle(isOn: Binding(get: { session.looping }, set: { session.looping = $0 })) {
-                Image(systemName: "repeat")
+            let loopActive = session.loopMode != .off
+            Button { session.cycleLoopMode() } label: {
+                Image(systemName: session.loopMode == .pingPong ? "infinity" : "repeat")
             }
-            .toggleStyle(.button)
-            .infoBubble(session.hasSelection ? "Loop the selection" : "Loop")
+            .tint(loopActive ? .accentColor : nil)
+            .background {
+                if loopActive {
+                    RoundedRectangle(cornerRadius: 5).fill(.tint.opacity(0.22))
+                }
+            }
+            .infoBubble(loopHelp)
 
             Text(Fmt.duration(Double(mirroredPlayhead ?? 0) / max(1, session.sampleRate)))
                 .font(.caption).monospacedDigit().foregroundStyle(.secondary)
