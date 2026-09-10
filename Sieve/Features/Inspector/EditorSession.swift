@@ -349,6 +349,17 @@ final class EditorSession {
         if player.isPlaying { stopPlayback() } else { startPlayback() }
     }
 
+    /// Jump to the start — frame 0, or the selection's start when there is one — and play.
+    /// Restarts from there even if already playing.
+    func playFromStart() {
+        guard let clip, clip.frameCount > 0 else { return }
+        cursor = 0
+        cursorInitialized = true
+        guard playbackRange.count > 0 else { return }
+        env.player.stop()
+        player.play(clip, range: playbackRange, loopMode: loopMode)
+    }
+
     func startPlayback() {
         guard let clip, clip.frameCount > 0 else { return }
         // First Play in a fresh session: pick up from the list preview if it's on this file,

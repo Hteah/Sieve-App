@@ -180,6 +180,10 @@ struct AudioEditorView: View {
 
     private var transport: some View {
         HStack(spacing: 8) {
+            Button { session.playFromStart() } label: {
+                Image(systemName: "backward.end.fill")
+            }
+            .infoBubble(session.hasSelection ? "Play the selection from its start" : "Play from the beginning")
             Button { session.togglePlay() } label: {
                 Image(systemName: session.player.isPlaying ? "stop.fill" : "play.fill")
             }
