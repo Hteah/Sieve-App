@@ -20,7 +20,27 @@ struct SidebarView: View {
     @Bindable var model: LibraryViewModel
     @AppStorage(QuickTags.storageKey) private var quickTagSlotsJSON = ""
     @State private var rootToRemove: Root?
-    @State private var collapsedGroups: Set<Int64> = []
+    /// Which folder groups are collapsed. Backed by a JSON-encoded @AppStorage string (Set
+    /// isn't a supported AppStorage type directly), same convention as quickTagSlotsJSON below
+    /// -- so a session's manual expand/collapse fiddling survives a crash, but in the normal
+    /// case it's overwritten within the first instant of every launch by applyDefaultExpansion()
+    /// below, which is the real fix for the actual complaint (everything reopening expanded).
+    @AppStorage("collapsedFolderGroups") private var collapsedGroupsJSON = ""
+    private var collapsedGroups: Set<Int64> {
+        get { Set((try? JSONDecoder().decode([Int64].self, from: Data(collapsedGroupsJSON.utf8))) ?? []) }
+        // nonmutating: collapsedGroupsJSON (an @AppStorage) is itself already fine to write from
+        // a non-mutating context; without this, every call site (a View's methods are all
+        // non-mutating) would need to become `mutating`, which View's own body wouldn't allow.
+        nonmutating set { collapsedGroupsJSON = (try? String(data: JSONEncoder().encode(Array(newValue)), encoding: .utf8)) ?? "" }
+    }
+    /// The folder group last actively browsed (selecting a root or folder inside it, or the
+    /// group row itself) -- kept across launches so a fresh launch knows which one group to
+    /// leave open. 0 = none yet (never browsed into a grouped folder).
+    @AppStorage("lastActiveFolderGroupId") private var lastActiveFolderGroupId: Int = 0
+    /// Guards applyDefaultExpansion() to run only once per launch -- model.groups loads
+    /// asynchronously (a GRDB ValueObservation), so this fires off its .onChange rather than
+    /// .onAppear, the first time a real (non-empty) group list arrives.
+    @State private var appliedDefaultExpansion = false
     @State private var groupSheet: GroupSheet?
     @State private var groupNameDraft = ""
     @State private var quickTagRenameSlot: Int?
@@ -177,6 +197,15 @@ struct SidebarView: View {
         }
         .onChange(of: model.filter.scope, initial: true) { _, s in
             if selection.count <= 1 { selection = [s] }
+            rememberLastActiveGroup(for: s)
+        }
+        // model.groups loads asynchronously, so wait for the first non-empty delivery rather
+        // than applying this at .onAppear (which would almost always still see the empty
+        // pre-load array and have nothing to collapse).
+        .onChange(of: model.groups.isEmpty, initial: true) { _, isEmpty in
+            guard !isEmpty, !appliedDefaultExpansion else { return }
+            appliedDefaultExpansion = true
+            applyDefaultExpansion()
         }
         .alert("Rename Quick Tag", isPresented: Binding(get: { quickTagRenameSlot != nil }, set: { if !$0 { quickTagRenameSlot = nil } })) {
             TextField("Name", text: $quickTagNameDraft)
@@ -378,6 +407,32 @@ struct SidebarView: View {
                 set: { open in
                     if open { collapsedGroups.remove(groupId) } else { collapsedGroups.insert(groupId) }
                 })
+    }
+
+    /// Notes which group `scope` belongs to, if any, as the one to leave open on the next
+    /// launch. Scopes that aren't inside a folder group (All Samples, Favorites, an ungrouped
+    /// root, a tag, ...) leave the last-noted group alone rather than clearing it -- browsing
+    /// away to "All Samples" for a moment shouldn't forget which folder you were just in.
+    private func rememberLastActiveGroup(for scope: LibraryScope) {
+        let gid: Int64?
+        switch scope {
+        case .group(let id): gid = id
+        case .root(let rootId): gid = model.roots.first { $0.id == rootId }?.groupId
+        case .folder(let rootId, _): gid = model.roots.first { $0.id == rootId }?.groupId
+        default: gid = nil
+        }
+        if let gid { lastActiveFolderGroupId = Int(gid) }
+    }
+
+    /// The actual fix for "everything reopens expanded": collapse every folder group except
+    /// the one last browsed into (all of them, if none ever was -- a decluttered start is a
+    /// better default than an arbitrary one). Runs once per launch, once model.groups has its
+    /// first real value -- see the .onChange(of: model.groups.isEmpty) call site.
+    private func applyDefaultExpansion() {
+        let allGroupIds = Set(model.groups.compactMap(\.id))
+        guard !allGroupIds.isEmpty else { return }
+        let keepOpen = lastActiveFolderGroupId != 0 ? Int64(lastActiveFolderGroupId) : nil
+        collapsedGroups = keepOpen.map { allGroupIds.subtracting([$0]) } ?? allGroupIds
     }
 
     /// Load the 6 Quick Tag slots, mutate slot `i`, and persist back to `@AppStorage`.
