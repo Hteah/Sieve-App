@@ -31,6 +31,13 @@ final class AppEnvironment {
         self.bookmarks = BookmarkStore()
         self.scanner = ScanCoordinator(database: database, bookmarks: bookmarks)
         self.player = PreviewPlayer()
+        // SettingsView's "Preview volume" slider only pushed this into the player while
+        // Settings itself was on screen (its .onChange(initial: true) is what applied it), so a
+        // launch that never opened Settings left the player at its hardcoded default of full
+        // volume regardless of what was persisted. Apply it here instead, once, at the source.
+        if let stored = UserDefaults.standard.object(forKey: "previewVolume") as? Double {
+            player.volume = Float(stored)
+        }
         self.volumeMonitor = VolumeMonitor()
         self.audioEditorBookmark = UserDefaults.standard.data(forKey: Self.editorBookmarkKey)
         self.audioEditorName = UserDefaults.standard.string(forKey: Self.editorNameKey)

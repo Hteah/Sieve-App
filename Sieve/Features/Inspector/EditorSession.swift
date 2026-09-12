@@ -64,6 +64,11 @@ final class EditorSession {
     init(env: AppEnvironment) {
         self.env = env
         self.recorder = AudioRecorder(env: env, player: player)
+        // See AppEnvironment.init's identical guard on "previewVolume" -- same reasoning, this
+        // player's own persisted key.
+        if let stored = UserDefaults.standard.object(forKey: "editorVolume") as? Double {
+            player.volume = Float(stored)
+        }
     }
 
     /// Starts/stops capturing input to a new WAV. Editor playback is left alone so you can play
