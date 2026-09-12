@@ -33,8 +33,29 @@ struct EditorWaveformView: View {
     @State private var visibleFrames = 0          // 0 => whole clip
     @State private var drag: DragState?
 
+    // Edge auto-scroll: while dragging a selection edge (or making a new selection) with the
+    // pointer at/past the left or right edge, keep panning the visible window that way so the
+    // rest of a zoomed-in clip is reachable without a separate scroll gesture. `edgeScrollDir`
+    // is -1/0/+1; `edgeScrollMouseX` is the pointer's last raw x (not clamped to the view --
+    // AppKit keeps delivering mouseDragged with it even once the pointer is outside the window)
+    // so the selection edge can be re-derived against the newly-revealed content each tick.
+    // Driven by the always-on .onReceive timer in `body`, not by mouseDragged itself, so it
+    // keeps going even while the pointer is held still past the edge (dragging stops producing
+    // move events once the pointer stops moving).
+    @State private var edgeScrollDir = 0
+    @State private var edgeScrollMouseX: CGFloat = 0
+    // Created once (an @State initial value only runs on first appearance, not every body
+    // re-evaluation) and reused by .onReceive below. Building this inline in body instead would
+    // recreate the publisher -- and so its underlying Timer -- on every re-render, and a drag
+    // triggers a re-render on essentially every mouse-move; the timer rarely survived long
+    // enough between rebuilds to actually fire, which is why edge auto-scroll only "sometimes"
+    // kicked in. `.common` (not `.default`) keeps it firing while AppKit is in the mouse-drag
+    // tracking run loop, which is `.default`'s whole scope during a drag.
+    @State private var edgeScrollTicker = Timer.publish(every: 1.0 / 30.0, on: .main, in: .common).autoconnect()
+
     private let minSpan = 16
     private let edgeTolerance: CGFloat = 8
+    private let edgeScrollZonePx: CGFloat = 28
     private let rulerHeight: CGFloat = 18
 
     enum EdgeHit { case newSelection, resizeStart, resizeEnd }
@@ -97,6 +118,9 @@ struct EditorWaveformView: View {
                 visibleStart = min(visibleStart, max(0, newValue - 1))
             }
             .onChange(of: playheadFrame) { _, f in followIfNeeded(to: f) }
+            .onReceive(edgeScrollTicker) { _ in
+                stepEdgeScroll(width: width, span: span, start: start)
+            }
         }
     }
 
@@ -198,7 +222,14 @@ struct EditorWaveformView: View {
             case .resizeStart, .resizeEnd:
                 selection = lo..<max(hi, lo + 1)
             }
+            // Pointer at (or past) a side edge -> arm the auto-scroll; the .onReceive timer in
+            // `body` drives it, so it keeps going even while the pointer is held still there.
+            edgeScrollMouseX = px
+            edgeScrollDir = px <= edgeScrollZonePx ? -1
+                          : px >= width - edgeScrollZonePx ? 1
+                          : 0
         case .ended:
+            edgeScrollDir = 0   // the drag is over -- stop any edge auto-scroll
             defer { drag = nil }
             guard let d = drag else { return }
             switch d.kind {
@@ -213,6 +244,37 @@ struct EditorWaveformView: View {
             case .resizeStart, .resizeEnd:
                 onSelectionCommitted?()      // playback jumps to the adjusted selection
             }
+        }
+    }
+
+    /// Ticked ~30x/sec (see `body`'s .onReceive) for as long as the view exists; a no-op unless
+    /// a drag is in progress with the pointer parked at/past a side edge. Pans `visibleStart`
+    /// that way and re-derives the dragged selection edge from the pinned pointer x against the
+    /// newly-revealed window, so the selection keeps extending into content that wasn't visible
+    /// when the drag started.
+    private func stepEdgeScroll(width: CGFloat, span: Int, start: Int) {
+        guard edgeScrollDir != 0, let d = drag else { return }
+        let n = clip.frameCount
+        guard span > 0, span < n else { return }   // fully zoomed out -- nothing more to reveal
+
+        let framesPerPixel = Double(span) / Double(max(1, width))
+        let depthPastInner = edgeScrollDir < 0 ? (edgeScrollZonePx - edgeScrollMouseX)
+                                                : (edgeScrollMouseX - (width - edgeScrollZonePx))
+        let stepPx = min(40, max(8, depthPastInner * 1.5))
+        let deltaFrames = Int((Double(edgeScrollDir) * Double(stepPx) * framesPerPixel).rounded())
+
+        let maxStart = max(0, n - span)
+        let newStart = min(max(0, start + deltaFrames), maxStart)
+        guard newStart != start else { return }
+        visibleStart = newStart
+
+        let f = frame(atX: edgeScrollMouseX, width: width, span: span, start: newStart)
+        let lo = min(d.anchor, f), hi = max(d.anchor, f)
+        switch d.kind {
+        case .newSelection:
+            selection = lo < hi ? lo..<hi : nil
+        case .resizeStart, .resizeEnd:
+            selection = lo..<max(hi, lo + 1)
         }
     }
 
