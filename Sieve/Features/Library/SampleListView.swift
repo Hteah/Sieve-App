@@ -27,6 +27,13 @@ struct SampleListView: View {
     // keyboard focus off the Table — so the next Space press lands nowhere (or in the
     // search field). Re-assert focus here after any row/waveform interaction.
     @FocusState private var listFocused: Bool
+    /// The row a shift-click range-select extends from — the last row clicked with no modifier,
+    /// or with ⌘. See nameCell's TapGesture: `.draggable` on every row cell swallows the click
+    /// that Table's own selection handling would otherwise see (including shift/⌘ variants), so
+    /// plain/⌘/shift-click are all handled by hand here instead of relying on Table's native
+    /// multi-select, which — with `.draggable` in the mix — turned out to only catch shift/⌘
+    /// clicks "sometimes" (a race between two gesture recognizers on the same press).
+    @State private var selectionAnchor: Int64?
 
     private struct ConvertRequest: Identifiable {
         let id = UUID()
@@ -314,17 +321,51 @@ struct SampleListView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
-        // `.draggable` on a Table cell swallows the click that would select the row, so select
-        // it here — unless a modifier means the user is extending the native shift/⌘ selection.
+        // `.draggable` on a Table cell swallows the click that would select the row — including
+        // shift/⌘ variants, which turned out to only reach Table's own native multi-select
+        // "sometimes" (a race between two gesture recognizers on the same press). So all three
+        // click kinds are handled here by hand, Finder-style, rather than leaning on Table's
+        // native handling at all: plain click selects just this row (and becomes the range
+        // anchor); ⌘ toggles this row in/out of the selection (and becomes the anchor); shift
+        // selects the contiguous range from the anchor (the last plain/⌘ click, or an edge of
+        // the existing selection if there's no anchor yet) through this row, using `model.rows`'
+        // current (sorted) order — same as Finder/List.
         .simultaneousGesture(TapGesture().onEnded {
-            if NSEvent.modifierFlags.isDisjoint(with: [.shift, .command]) {
-                model.selection = [row.id]
-            }
+            selectRow(row, modifiers: NSEvent.modifierFlags)
         })
         .draggable(SampleDrag(id: row.id,
                               fileURL: env.fileURL(for: row),
                               rootURL: env.rootURL(for: row.rootId),
                               filename: row.filename))
+    }
+
+    /// Manual plain/⌘/shift click-to-select, standing in for Table's native multi-select — see
+    /// the comment on nameCell's TapGesture for why.
+    private func selectRow(_ row: SampleRow, modifiers: NSEvent.ModifierFlags) {
+        if modifiers.contains(.shift) {
+            let anchorId = selectionAnchor ?? model.selection.first
+            guard let anchorId, let anchorIdx = model.rows.firstIndex(where: { $0.id == anchorId }),
+                  let rowIdx = model.rows.firstIndex(where: { $0.id == row.id })
+            else {
+                model.selection = [row.id]   // no usable anchor (e.g. nothing selected yet)
+                selectionAnchor = row.id
+                return
+            }
+            let range = anchorIdx <= rowIdx ? anchorIdx...rowIdx : rowIdx...anchorIdx
+            model.selection = Set(model.rows[range].map(\.id))
+            // Anchor deliberately NOT updated — a second shift-click re-extends from the same
+            // anchor, like Finder, instead of the range creeping from wherever the last one landed.
+        } else if modifiers.contains(.command) {
+            if model.selection.contains(row.id) {
+                model.selection.remove(row.id)
+            } else {
+                model.selection.insert(row.id)
+            }
+            selectionAnchor = row.id
+        } else {
+            model.selection = [row.id]
+            selectionAnchor = row.id
+        }
     }
 
     /// Shows/hides trailing `Table` columns for the current list width. Not called while a pane
