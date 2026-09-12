@@ -495,9 +495,20 @@ extension Int64: @retroactive Transferable {
     }
 }
 
-/// Drag payload for a sample row: exports the real audio file (for Finder / other apps), and the
+/// Drag payload for a sample row: exports the real audio file (for Finder / other apps), the
 /// sample id **as plain text** so the sidebar's AppKit drop catchers can read it off the
-/// pasteboard (SwiftUI's own `.dropDestination` on `List` rows loses the payload).
+/// pasteboard (SwiftUI's own `.dropDestination` on `List` rows loses the payload), and the same
+/// file again as a **plain file URL** (see below).
+///
+/// FileRepresentation hands the file over as a file *promise* -- a pasteboard mechanism only
+/// apps that specifically support NSFilePromiseReceiver know how to resolve (Finder chief among
+/// them). A plain AppKit/JUCE-style NSDraggingDestination -- the older, simpler kind that just
+/// expects a file URL already sitting on the pasteboard -- never sees a promise-based drag at
+/// all, so a drop onto one of those silently does nothing (dragging onto the Desktop first,
+/// where Finder resolves the promise into a real file, then works fine -- that's the tell).
+/// The ProxyRepresentation below exports the same URL through URL's own Transferable
+/// conformance, which puts a genuine file-url pasteboard item rather than a promise, so those
+/// apps have something to read directly.
 struct SampleDrag: Transferable {
     let id: Int64
     let fileURL: URL?
@@ -521,6 +532,11 @@ struct SampleDrag: Transferable {
         .suggestedFileName { $0.filename }
 
         ProxyRepresentation(exporting: { String($0.id) })
+
+        ProxyRepresentation(exporting: { drag -> URL in
+            guard let fileURL = drag.fileURL else { throw CocoaError(.fileNoSuchFile) }
+            return fileURL
+        })
     }
 }
 

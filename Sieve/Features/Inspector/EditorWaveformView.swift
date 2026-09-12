@@ -76,6 +76,8 @@ struct EditorWaveformView: View {
                     onDrag: { x, phase in handleDrag(x: x, phase: phase, width: width, span: span, start: start) },
                     onDoubleClick: { _ in if n > 0 { selection = 0..<n } },
                     edgeNearX: { x in nearSelectionEdge(x, width: width, span: span, start: start) },
+                    insideSelectionX: { x in insideSelectionBody(x, width: width, span: span, start: start) },
+                    beginDragExport: { exportSelectionToTempFile() },
                     zoomKeysEnabled: keyboardZoomEnabled,
                     onZoomKey: { key in
                         switch key {
@@ -134,6 +136,42 @@ struct EditorWaveformView: View {
         let sx = x(forFrame: s.lowerBound, width: width, span: span, start: start)
         let ex = x(forFrame: s.upperBound, width: width, span: span, start: start)
         return abs(px - sx) <= edgeTolerance || abs(px - ex) <= edgeTolerance
+    }
+
+    /// A press here (inside the selection, clear of either edge) is a candidate to drag the
+    /// selection out as a file, not to redraw the selection -- see CatchingView's dragExport
+    /// handling. Companion to nearSelectionEdge; the two are mutually exclusive by construction
+    /// (both keep clear of the edgeTolerance margin).
+    private func insideSelectionBody(_ px: CGFloat, width: CGFloat, span: Int, start: Int) -> Bool {
+        guard let s = selection, !s.isEmpty else { return false }
+        let sx = x(forFrame: s.lowerBound, width: width, span: span, start: start)
+        let ex = x(forFrame: s.upperBound, width: width, span: span, start: start)
+        return px > sx + edgeTolerance && px < ex - edgeTolerance
+    }
+
+    /// Writes the current selection to a throwaway temp WAV for CatchingView to hand AppKit's
+    /// native drag session (dragging the audio out to Finder, another app, or another Sieve
+    /// window). Each drag gets its own temp subfolder so the dragged file keeps a clean,
+    /// human-readable name (e.g. a DAW that reads the dragged filename shows something sane)
+    /// without risking a collision with a previous drag's file of the same name.
+    private func exportSelectionToTempFile() -> URL? {
+        guard let sel = selection, !sel.isEmpty else { return nil }
+        let range = clip.clampedRange(sel)
+        guard !range.isEmpty else { return nil }
+
+        let folder = FileManager.default.temporaryDirectory
+            .appendingPathComponent("SieveDrag-\(UUID().uuidString)", isDirectory: true)
+        guard (try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)) != nil
+        else { return nil }
+
+        let name = EditorSession.exportName(stem: "Sieve Selection", range: range, sampleRate: clip.sampleRate)
+        let url = folder.appendingPathComponent(name)
+        do {
+            try AudioFileIO.writeWAV(clip.cropped(to: range), to: url, bits: .int(24))
+            return url
+        } catch {
+            return nil
+        }
     }
 
     private func handleDrag(x px: CGFloat, phase: InputCatcher.Phase, width: CGFloat, span: Int, start: Int) {
@@ -489,6 +527,13 @@ private struct InputCatcher: NSViewRepresentable {
     var onDrag: (_ x: CGFloat, _ phase: Phase) -> Void
     var onDoubleClick: (_ x: CGFloat) -> Void
     var edgeNearX: (_ x: CGFloat) -> Bool
+    /// True for a press clear of both edges but still inside the selection -- see
+    /// EditorWaveformView.insideSelectionBody(). A press there arms a possible drag-export
+    /// instead of redrawing the selection.
+    var insideSelectionX: (_ x: CGFloat) -> Bool
+    /// Writes the selection to a temp file for the native drag session; nil (nothing to
+    /// export, or the write failed) falls back to treating the gesture as a plain click.
+    var beginDragExport: () -> URL?
     var zoomKeysEnabled = false
     var onZoomKey: ((ZoomKey) -> Void)? = nil
 
@@ -507,19 +552,34 @@ private struct InputCatcher: NSViewRepresentable {
         view.onDrag = onDrag
         view.onDoubleClick = onDoubleClick
         view.edgeNearX = edgeNearX
+        view.insideSelectionX = insideSelectionX
+        view.beginDragExport = beginDragExport
         view.zoomKeysEnabled = zoomKeysEnabled
         view.onZoomKey = onZoomKey
     }
 
-    final class CatchingView: NSView {
+    final class CatchingView: NSView, NSDraggingSource {
         var onScroll: ((CGFloat, CGFloat, CGFloat) -> Void)?
         var onDrag: ((CGFloat, Phase) -> Void)?
         var onDoubleClick: ((CGFloat) -> Void)?
         var edgeNearX: ((CGFloat) -> Bool)?
+        var insideSelectionX: ((CGFloat) -> Bool)?
+        var beginDragExport: (() -> URL?)?
         var zoomKeysEnabled = false
         var onZoomKey: ((ZoomKey) -> Void)?
         private var tracking: NSTrackingArea?
         private var dragging = false
+
+        // Drag-export state: armed the moment a press lands inside the selection body (see
+        // insideSelectionX), then either turns into a native file-drag (past the 6pt threshold,
+        // same slop R3WRK's waveform uses for the same gesture) or, if released before that,
+        // gets replayed as an ordinary began/ended pair so the existing click-vs-drag logic in
+        // EditorWaveformView.handleDrag (a zero-distance drag) does its normal deselect + seek --
+        // no need to duplicate that logic here.
+        private var dragExportArmed = false
+        private var dragExportStarted = false
+        private var dragExportPressWindowLoc: NSPoint = .zero
+        private var dragExportPressX: CGFloat = 0
 
         /// ⌘+ / ⌘= zoom in, ⌘- zoom out, ⌘0 fit. Handled here (not as SwiftUI
         /// `.keyboardShortcut` buttons) so it survives the ~30 fps re-render during playback.
@@ -552,20 +612,67 @@ private struct InputCatcher: NSViewRepresentable {
         }
 
         override func mouseDown(with event: NSEvent) {
-            if event.clickCount == 2 { onDoubleClick?(localX(event)) }
-            else { dragging = true; onDrag?(localX(event), .began) }
+            if event.clickCount == 2 { onDoubleClick?(localX(event)); return }
+            let x = localX(event)
+            if insideSelectionX?(x) == true {
+                // Don't tell SwiftUI about this press yet -- see dragExportArmed's comment.
+                dragExportArmed = true
+                dragExportStarted = false
+                dragExportPressWindowLoc = event.locationInWindow
+                dragExportPressX = x
+            } else {
+                dragging = true
+                onDrag?(x, .began)
+            }
         }
 
-        override func mouseDragged(with event: NSEvent) { onDrag?(localX(event), .changed) }
+        override func mouseDragged(with event: NSEvent) {
+            guard dragExportArmed else { onDrag?(localX(event), .changed); return }
+            guard !dragExportStarted else { return }   // the native drag session owns the rest of the gesture
+
+            let dx = event.locationInWindow.x - dragExportPressWindowLoc.x
+            let dy = event.locationInWindow.y - dragExportPressWindowLoc.y
+            guard (dx * dx + dy * dy).squareRoot() > 6 else { return }   // same slop as R3WRK's waveform
+
+            guard let url = beginDragExport?() else {
+                dragExportArmed = false   // couldn't export -- mouseUp's replay path is skipped; gesture is just dropped
+                return
+            }
+            dragExportStarted = true
+
+            let item = NSDraggingItem(pasteboardWriter: url as NSURL)
+            let loc = convert(event.locationInWindow, from: nil)
+            item.draggingFrame = NSRect(x: loc.x - 20, y: loc.y - 20, width: 40, height: 40)
+            beginDraggingSession(with: [item], event: event, source: self)
+        }
 
         override func mouseUp(with event: NSEvent) {
+            if dragExportArmed {
+                dragExportArmed = false
+                if !dragExportStarted {
+                    // A plain click inside the selection, no real drag -- replay it as an
+                    // ordinary zero-distance drag so handleDrag's existing click-vs-drag slop
+                    // check deselects + seeks here, exactly as a click anywhere else would.
+                    onDrag?(dragExportPressX, .began)
+                    onDrag?(dragExportPressX, .ended)
+                }
+                return
+            }
             dragging = false
             onDrag?(localX(event), .ended)
         }
 
+        // MARK: NSDraggingSource -- the drag-export session started in mouseDragged above.
+
+        func draggingSession(_ session: NSDraggingSession, sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation {
+            context == .outsideApplication ? .copy : []
+        }
+
         override func mouseMoved(with event: NSEvent) {
             guard !dragging else { return }
-            if edgeNearX?(localX(event)) == true { NSCursor.resizeLeftRight.set() }
+            let x = localX(event)
+            if edgeNearX?(x) == true { NSCursor.resizeLeftRight.set() }
+            else if insideSelectionX?(x) == true { NSCursor.openHand.set() }
             else { NSCursor.arrow.set() }
         }
 
