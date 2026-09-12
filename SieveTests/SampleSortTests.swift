@@ -5,7 +5,7 @@ import Testing
 struct SampleSortTests {
     private func row(_ id: Int64, name: String, rate: Double?, bits: Int?) -> SampleRow {
         SampleRow(id: id, rootId: 1, relativePath: name, filename: name, parentDir: "", ext: "wav",
-                  fileSize: 1, modifiedAt: .init(), audioHash: nil, fileHash: nil, durationSec: 1,
+                  fileSize: 1, modifiedAt: .init(), createdAt: .init(), audioHash: nil, fileHash: nil, durationSec: 1,
                   sampleRate: rate, channels: 2, bitDepth: bits, formatName: "WAV PCM", bpm: nil,
                   musicalKey: nil, waveform: nil, peakDb: nil, rmsDb: nil, clippedSamples: nil,
                   status: .present, rating: nil, isFavorite: nil, quickTags: nil, tagNames: nil)

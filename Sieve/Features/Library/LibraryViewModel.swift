@@ -1,7 +1,6 @@
 import Foundation
 import GRDB
 import Observation
-import SwiftUI
 import os
 
 /// Drives the sidebar + table: observes the DB for the current filter and keeps selection.
@@ -11,6 +10,12 @@ final class LibraryViewModel {
     private let database: AppDatabase
     private static let log = Logger(subsystem: "com.arlo.Sieve", category: "library")
 
+    /// How many rows the list loads at a time. A scope with thousands of samples (e.g. "All")
+    /// only ever hands the `Table` this many rows at once — see the pagination comment on
+    /// `restartRowsObservation`. 500 is comfortably inside the range the table's sort-column
+    /// full-rebuild (`SampleListView`'s `.id(sortToken)`) was already proven fine at (~800).
+    private static let pageSize = 500
+
     var filter = SampleFilter() {
         didSet {
             guard filter != oldValue else { return }
@@ -18,17 +23,26 @@ final class LibraryViewModel {
             // doesn't invalidate ContentView (which only cares whether the duplicates view is up).
             let dup = filter.scope == .duplicates
             if showsDuplicates != dup { showsDuplicates = dup }
-            // A pure sort change (field or direction) just reorders the rows already in memory —
-            // no need to tear down the observation and re-decode the whole table from SQLite.
-            if filter.samePredicate(as: oldValue) {
-                sortRowsInPlace()
-            } else {
-                restartRowsObservation()
+            // Sort changes used to just reorder the rows already in memory, but that meant a
+            // library-wide scope handed its *entire* row set to the table to re-sort and
+            // re-render — fine at a few hundred rows, but a 15k+ sample library pegged the CPU
+            // and beachballed on a single column-header click. Every filter change — sort
+            // included — now re-queries SQL (which sorts cheaply regardless of table size) and
+            // resets to the first page, so the table never has to rebuild more than `pageSize`
+            // rows at once, no matter how large the scope is.
+            restartRowsObservation(resetPage: true)
+            if !filter.samePredicate(as: oldValue) {
+                restartCountObservation()
             }
         }
     }
     private(set) var showsDuplicates = false
     private(set) var rows: [SampleRow] = []
+    /// True count of the current scope (ignores pagination) — shown in the status bar since
+    /// `rows.count` is now just the loaded window, not the whole scope.
+    private(set) var totalCount = 0
+    /// Whether more rows exist beyond the currently loaded window.
+    private(set) var hasMoreRows = false
     private(set) var roots: [Root] = []
     private(set) var groups: [FolderGroup] = []
     private(set) var folderTrees: [Int64: [Queries.FolderNode]] = [:]
@@ -38,13 +52,15 @@ final class LibraryViewModel {
     var selection = Set<Int64>()
 
     @ObservationIgnored private var rowsTask: Task<Void, Never>?
+    @ObservationIgnored private var countTask: Task<Void, Never>?
     @ObservationIgnored private var sidebarTask: Task<Void, Never>?
     @ObservationIgnored private var searchDebounce: Task<Void, Never>?
-    @ObservationIgnored private var sortTask: Task<Void, Never>?
+    @ObservationIgnored private var pageLimit = LibraryViewModel.pageSize
 
     init(database: AppDatabase) {
         self.database = database
-        restartRowsObservation()
+        restartRowsObservation(resetPage: true)
+        restartCountObservation()
         startSidebarObservation()
     }
 
@@ -72,53 +88,38 @@ final class LibraryViewModel {
 
     func root(for id: Int64) -> Root? { roots.first { $0.id == id } }
 
-    /// Reorders the rows already in memory for the current sort — no database round-trip.
-    /// Large lists are sorted off the main actor. The assignment is made without an implicit
-    /// animation so the table doesn't choreograph hundreds of row moves.
-    private func sortRowsInPlace() {
-        let sort = filter.sort
-        let ascending = filter.sortAscending
-        let source = rows
-        sortTask?.cancel()
-
-        guard source.count > 1_000 else {
-            let clock = ContinuousClock()
-            let start = clock.now
-            let sorted = source.sorted { sort.rowsAreInOrder($0, $1, ascending: ascending) }
-            let elapsed = clock.now - start
-            Self.log.info("sort \(source.count) rows by \(sort.rawValue, privacy: .public) asc=\(ascending): \(elapsed.description, privacy: .public)")
-            assignRows(sorted)
-            return
-        }
-        sortTask = Task { [weak self] in
-            let sorted = await Task.detached(priority: .userInitiated) {
-                source.sorted { sort.rowsAreInOrder($0, $1, ascending: ascending) }
-            }.value
-            guard !Task.isCancelled, let self,
-                  self.filter.sort == sort, self.filter.sortAscending == ascending else { return }
-            self.assignRows(sorted)
-        }
-    }
-
-    private func assignRows(_ newRows: [SampleRow]) {
-        var tx = Transaction()
-        tx.disablesAnimations = true
-        withTransaction(tx) { rows = newRows }
+    /// Called as rows scroll into view; grows the loaded window once the trailing edge of what's
+    /// already loaded comes on screen. A no-op while more rows can't exist, or a load is already
+    /// in flight (rapid scrolling would otherwise fire this many times over before the first
+    /// requery lands).
+    func loadMoreIfNeeded(near row: SampleRow) {
+        guard hasMoreRows, !isLoading,
+              let idx = rows.firstIndex(where: { $0.id == row.id }),
+              idx >= rows.count - 20 else { return }
+        pageLimit += Self.pageSize
+        restartRowsObservation(resetPage: false)
     }
 
     // MARK: Observation
 
-    private func restartRowsObservation() {
+    /// (Re)starts the rows observation for the current filter, bounded to `pageLimit` rows.
+    /// `resetPage: true` (any predicate or sort change) snaps back to the first page; `false`
+    /// (scrolling near the loaded edge, via `loadMoreIfNeeded`) keeps growing it. Re-querying
+    /// SQL with a bigger LIMIT is cheap even for a huge scope — the actual reason this is bounded
+    /// at all is the `Table` rendering the result, not the database read.
+    private func restartRowsObservation(resetPage: Bool) {
         rowsTask?.cancel()
-        let request = Queries.request(for: filter)
+        if resetPage { pageLimit = Self.pageSize }
+        let limit = pageLimit
+        let request = Queries.request(for: filter, limit: limit)
         isLoading = true
         let observation = ValueObservation.tracking { db in try request.fetchAll(db) }
         rowsTask = Task { [weak self, database] in
             do {
                 for try await rows in observation.values(in: database.reader) {
                     guard let self, !Task.isCancelled else { return }
-                    self.sortTask?.cancel()
                     self.rows = rows            // already ordered by the query's ORDER BY
+                    self.hasMoreRows = rows.count == limit
                     self.isLoading = false
                     // Drop selection entries that no longer exist.
                     let ids = Set(rows.map(\.id))
@@ -126,6 +127,24 @@ final class LibraryViewModel {
                 }
             } catch {
                 Self.log.error("rows observation failed: \(error, privacy: .public)")
+            }
+        }
+    }
+
+    /// Tracks the current scope's true row count, independent of the loaded page — shown in the
+    /// list's status bar since `rows.count` is only ever the loaded window.
+    private func restartCountObservation() {
+        countTask?.cancel()
+        let request = Queries.countRequest(for: filter)
+        let observation = ValueObservation.tracking { db in try request.fetchOne(db) ?? 0 }
+        countTask = Task { [weak self, database] in
+            do {
+                for try await count in observation.values(in: database.reader) {
+                    guard let self, !Task.isCancelled else { return }
+                    self.totalCount = count
+                }
+            } catch {
+                Self.log.error("count observation failed: \(error, privacy: .public)")
             }
         }
     }

@@ -23,4 +23,7 @@ enum Fmt {
     static func channels(_ c: Int?) -> String {
         switch c { case nil: "–"; case 1: "Mono"; case 2: "Stereo"; case let n?: "\(n) ch" }
     }
+    static func date(_ d: Date) -> String {
+        d.formatted(date: .abbreviated, time: .omitted)
+    }
 }

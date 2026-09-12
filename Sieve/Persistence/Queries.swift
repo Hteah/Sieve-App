@@ -2,7 +2,7 @@ import Foundation
 import GRDB
 
 enum SampleSort: String, CaseIterable, Sendable, Identifiable {
-    case name, path, duration, size, modified, rating, rate, bits, format
+    case name, path, duration, size, modified, created, rating, rate, bits, format
     var id: String { rawValue }
     var label: String {
         switch self {
@@ -11,6 +11,7 @@ enum SampleSort: String, CaseIterable, Sendable, Identifiable {
         case .duration: "Duration"
         case .size: "Size"
         case .modified: "Modified"
+        case .created: "Date Created"
         case .rating: "Rating"
         case .rate: "Sample rate"
         case .bits: "Bit depth"
@@ -26,6 +27,7 @@ enum SampleSort: String, CaseIterable, Sendable, Identifiable {
         case .duration: "durationSec"
         case .size: "fileSize"
         case .modified: "modifiedAt"
+        case .created: "createdAt"
         case .rating: "COALESCE(rating, 0)"
         case .rate: "sampleRate"
         case .bits: "bitDepth"
@@ -36,7 +38,7 @@ enum SampleSort: String, CaseIterable, Sendable, Identifiable {
     /// Sorts whose column can be NULL — those rows sort last regardless of direction.
     private var nullable: Bool {
         switch self {
-        case .name, .path, .rating, .format: false
+        case .name, .path, .rating, .format, .created: false
         case .duration, .size, .modified, .rate, .bits: true
         }
     }
@@ -45,7 +47,7 @@ enum SampleSort: String, CaseIterable, Sendable, Identifiable {
     var defaultAscending: Bool {
         switch self {
         case .name, .path, .rate, .bits, .format: true
-        case .duration, .size, .modified, .rating: false   // duration: longest first
+        case .duration, .size, .modified, .created, .rating: false   // duration: longest first
         }
     }
 
@@ -78,6 +80,8 @@ enum SampleSort: String, CaseIterable, Sendable, Identifiable {
             return a.fileSize == b.fileSize ? a.id < b.id : ascending == (a.fileSize < b.fileSize)
         case .modified:
             return a.modifiedAt == b.modifiedAt ? a.id < b.id : ascending == (a.modifiedAt < b.modifiedAt)
+        case .created:
+            return a.createdAt == b.createdAt ? a.id < b.id : ascending == (a.createdAt < b.createdAt)
         case .rating:
             let ra = a.rating ?? 0, rb = b.rating ?? 0
             return ra == rb ? a.id < b.id : ascending == (ra < rb)
@@ -140,8 +144,33 @@ struct SampleFilter: Hashable, Sendable {
 enum Queries {
     static let audioExtensions: [String] = ["wav", "aif", "aiff", "aifc", "flac", "mp3", "m4a", "aac", "caf"]
 
-    /// Builds the SQL for the library table from a filter. Reads from the `sample_with_annotation` view.
-    static func request(for filter: SampleFilter) -> SQLRequest<SampleRow> {
+    /// Builds the SQL for the library table from a filter. Reads from the `sample_with_annotation`
+    /// view. `limit`, when given, bounds how many rows come back — see `LibraryViewModel`'s
+    /// pagination: handing a whole 15k+ row scope to SwiftUI's `Table` at once is what made a
+    /// sort-header click hang the app, so the list now only ever loads a bounded window of a
+    /// large scope, growing it as the user scrolls (`countRequest` below reports the true total).
+    static func request(for filter: SampleFilter, limit: Int? = nil) -> SQLRequest<SampleRow> {
+        let (wheres, joins) = clauses(for: filter)
+        let whereClause: SQL = wheres.isEmpty ? "" : "WHERE " + wheres.joined(separator: " AND ")
+        let order = SQL(sql: "ORDER BY " + filter.sort.sqlOrder(ascending: filter.sortAscending))
+        let limitClause: SQL = limit.map { SQL(sql: "LIMIT \($0)") } ?? ""
+        return SQLRequest<SampleRow>(literal: """
+            SELECT v.* FROM sample_with_annotation v \(joins) \(whereClause) \(order) \(limitClause)
+            """)
+    }
+
+    /// Total rows matching a filter's predicate, ignoring sort (order doesn't affect a count).
+    /// Used to show the real total for a scope while the table only has a bounded window loaded.
+    static func countRequest(for filter: SampleFilter) -> SQLRequest<Int> {
+        let (wheres, joins) = clauses(for: filter)
+        let whereClause: SQL = wheres.isEmpty ? "" : "WHERE " + wheres.joined(separator: " AND ")
+        return SQLRequest<Int>(literal: """
+            SELECT COUNT(*) FROM sample_with_annotation v \(joins) \(whereClause)
+            """)
+    }
+
+    /// WHERE/JOIN construction shared by `request` and `countRequest`.
+    private static func clauses(for filter: SampleFilter) -> (wheres: [SQL], joins: SQL) {
         var wheres: [SQL] = []
         var joins: SQL = ""
 
@@ -184,11 +213,7 @@ enum Queries {
             joins = "JOIN sample_fts ON sample_fts.rowid = v.id AND sample_fts MATCH \(pattern)"
         }
 
-        let whereClause: SQL = wheres.isEmpty ? "" : "WHERE " + wheres.joined(separator: " AND ")
-        let order = SQL(sql: "ORDER BY " + filter.sort.sqlOrder(ascending: filter.sortAscending))
-        return SQLRequest<SampleRow>(literal: """
-            SELECT v.* FROM sample_with_annotation v \(joins) \(whereClause) \(order)
-            """)
+        return (wheres, joins)
     }
 
     /// Turn free text into a prefix-matching FTS5 query: each token becomes `"tok"*`.

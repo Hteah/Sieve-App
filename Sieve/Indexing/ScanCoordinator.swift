@@ -249,7 +249,7 @@ actor ScanCoordinator {
         try await database.writer.write { db in
             for chunk in diff.added.chunks(ofCount: 500) {
                 for entry in chunk {
-                    var s = Sample(rootId: rootId, relativePath: entry.relativePath, fileSize: entry.fileSize, modifiedAt: entry.modifiedAt, now: now)
+                    var s = Sample(rootId: rootId, relativePath: entry.relativePath, fileSize: entry.fileSize, modifiedAt: entry.modifiedAt, createdAt: entry.createdAt, now: now)
                     try s.insert(db)
                 }
             }

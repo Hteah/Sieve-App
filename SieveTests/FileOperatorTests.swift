@@ -49,8 +49,8 @@ struct FileOperatorTests {
             try r.insert(d)
             for rel in ["A/kick.wav", "B/kick.wav", "B/other.wav"] {
                 let url = root.appending(path: rel)
-                let v = try url.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey])
-                var s = Sample(rootId: r.id!, relativePath: rel, fileSize: Int64(v.fileSize!), modifiedAt: v.contentModificationDate!)
+                let v = try url.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey, .creationDateKey])
+                var s = Sample(rootId: r.id!, relativePath: rel, fileSize: Int64(v.fileSize!), modifiedAt: v.contentModificationDate!, createdAt: v.creationDate ?? v.contentModificationDate!)
                 let a = AudioAnalyzer.analyze(url: url)
                 s.audioHash = a.audioHash; s.indexedAt = Date()
                 try s.insert(d)
@@ -205,8 +205,8 @@ struct FileOperatorTests {
             var b = Root(name: "PackB", bookmarkData: Data(), lastResolvedPath: rootB.path, volumeUUID: nil)
             try b.insert(d)
             let url = rootA.appending(path: "Kicks/kick.wav")
-            let v = try url.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey])
-            var s = Sample(rootId: a.id!, relativePath: "Kicks/kick.wav", fileSize: Int64(v.fileSize!), modifiedAt: v.contentModificationDate!)
+            let v = try url.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey, .creationDateKey])
+            var s = Sample(rootId: a.id!, relativePath: "Kicks/kick.wav", fileSize: Int64(v.fileSize!), modifiedAt: v.contentModificationDate!, createdAt: v.creationDate ?? v.contentModificationDate!)
             s.audioHash = AudioAnalyzer.analyze(url: url).audioHash
             s.indexedAt = Date()
             try s.insert(d)

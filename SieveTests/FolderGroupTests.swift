@@ -12,7 +12,7 @@ struct FolderGroupTests {
             try ra.insert(d); try rb.insert(d)
             let now = Date()
             for (rid, name) in [(ra.id!, "a1.wav"), (ra.id!, "a2.wav"), (rb.id!, "b1.wav")] {
-                var s = Sample(rootId: rid, relativePath: name, fileSize: 1, modifiedAt: now)
+                var s = Sample(rootId: rid, relativePath: name, fileSize: 1, modifiedAt: now, createdAt: now)
                 s.audioHash = name; s.indexedAt = now
                 try s.insert(d)
             }

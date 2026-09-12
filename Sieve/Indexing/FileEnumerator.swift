@@ -5,6 +5,7 @@ struct FileEntry: Hashable, Sendable {
     var relativePath: String
     var fileSize: Int64
     var modifiedAt: Date
+    var createdAt: Date
 }
 
 enum FileEnumerationError: Error {
@@ -15,7 +16,7 @@ enum FileEnumerator {
     /// Recursively lists audio files under `root`. Throws if the enumeration itself fails
     /// (e.g. the volume disappeared) so the caller can abort without marking files missing.
     static func audioFiles(under root: URL, extensions: Set<String>, isCancelled: () -> Bool = { false }) throws -> [FileEntry] {
-        let keys: Set<URLResourceKey> = [.isRegularFileKey, .fileSizeKey, .contentModificationDateKey, .isPackageKey]
+        let keys: Set<URLResourceKey> = [.isRegularFileKey, .fileSizeKey, .contentModificationDateKey, .creationDateKey, .isPackageKey]
         nonisolated(unsafe) var enumerationError: (any Error)?
         guard let enumerator = FileManager.default.enumerator(
             at: root,
@@ -41,10 +42,14 @@ enum FileEnumerator {
             guard full.hasPrefix(rootPath) else { continue }
             var rel = String(full.dropFirst(rootPath.count))
             if rel.hasPrefix("/") { rel.removeFirst() }
+            let modifiedAt = values.contentModificationDate ?? .distantPast
             result.append(FileEntry(
                 relativePath: rel,
                 fileSize: Int64(values.fileSize ?? 0),
-                modifiedAt: values.contentModificationDate ?? .distantPast
+                modifiedAt: modifiedAt,
+                // Some filesystems (FAT, SMB) don't report a creation date; fall back to mtime
+                // rather than surface a nonsensical `.distantPast`.
+                createdAt: values.creationDate ?? modifiedAt
             ))
         }
         if let enumerationError {

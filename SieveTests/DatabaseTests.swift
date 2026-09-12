@@ -12,7 +12,7 @@ struct DatabaseTests {
             try root.insert(d)
             let now = Date()
             for (path, hash) in [("Kicks/Big Kick.wav", "h1"), ("Kicks/Sub/Deep Kick.wav", "h1"), ("Snares/Snap.wav", "h2"), ("Hats/Open.aif", "h3")] {
-                var s = Sample(rootId: root.id!, relativePath: path, fileSize: 100, modifiedAt: now)
+                var s = Sample(rootId: root.id!, relativePath: path, fileSize: 100, modifiedAt: now, createdAt: now)
                 s.audioHash = hash
                 s.indexedAt = now
                 try s.insert(d)
@@ -33,6 +33,25 @@ struct DatabaseTests {
         #expect(try await fetch(SampleFilter(scope: .folder(rootId: rootId, parentDir: "Kicks"))).count == 2)   // includes nested Sub/
         #expect(try await Set(fetch(SampleFilter(scope: .duplicates)).map(\.audioHash)) == ["h1"])
         #expect(try await fetch(SampleFilter(extensions: ["aif"])).map(\.filename) == ["Open.aif"])
+    }
+
+    /// `limit` bounds what the list pane loads at once (LibraryViewModel's pagination — a large
+    /// scope handed whole to the table is what hung the UI on a sort-header click); `countRequest`
+    /// still reports the true scope size regardless of that limit.
+    @Test func limitBoundsRowsAndCountReportsTrueTotal() async throws {
+        let db = try makeDB()
+        _ = try await seed(db)
+        let filter = SampleFilter()   // .all scope, 4 seeded samples
+
+        let page = try await db.reader.read { try Queries.request(for: filter, limit: 2).fetchAll($0) }
+        #expect(page.count == 2)
+        #expect(page.map(\.filename) == ["Big Kick.wav", "Deep Kick.wav"])   // name-ascending default
+
+        let all = try await db.reader.read { try Queries.request(for: filter).fetchAll($0) }
+        #expect(all.count == 4)
+
+        let total = try await db.reader.read { try Queries.countRequest(for: filter).fetchOne($0) }
+        #expect(total == 4)
     }
 
     @Test func folderTreeNests() async throws {

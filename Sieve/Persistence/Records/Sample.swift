@@ -18,6 +18,10 @@ struct Sample: Codable, Identifiable, Hashable, Sendable, FetchableRecord, Mutab
     var ext: String
     var fileSize: Int64
     var modifiedAt: Date
+    // Captured once, when the row is first added — a later "modified" diff (edit-in-place)
+    // updates `modifiedAt` but deliberately leaves this alone, same as the file's real
+    // creation date wouldn't change under an in-place edit.
+    var createdAt: Date
     var fileHash: String?
     var audioHash: String?
     var durationSec: Double?
@@ -35,7 +39,7 @@ struct Sample: Codable, Identifiable, Hashable, Sendable, FetchableRecord, Mutab
     var lastSeenAt: Date
     var indexedAt: Date?
 
-    init(rootId: Int64, relativePath: String, fileSize: Int64, modifiedAt: Date, now: Date = Date()) {
+    init(rootId: Int64, relativePath: String, fileSize: Int64, modifiedAt: Date, createdAt: Date, now: Date = Date()) {
         self.rootId = rootId
         self.relativePath = relativePath
         let comps = relativePath.split(separator: "/", omittingEmptySubsequences: true)
@@ -44,6 +48,7 @@ struct Sample: Codable, Identifiable, Hashable, Sendable, FetchableRecord, Mutab
         self.ext = (self.filename as NSString).pathExtension.lowercased()
         self.fileSize = fileSize
         self.modifiedAt = modifiedAt
+        self.createdAt = createdAt
         self.status = .present
         self.lastSeenAt = now
     }
@@ -71,6 +76,7 @@ struct SampleRow: Codable, Identifiable, Hashable, Sendable, FetchableRecord {
     var ext: String
     var fileSize: Int64
     var modifiedAt: Date
+    var createdAt: Date
     var audioHash: String?
     var fileHash: String?
     var durationSec: Double?
@@ -121,6 +127,7 @@ struct SampleRow: Codable, Identifiable, Hashable, Sendable, FetchableRecord {
             && lhs.rootId == rhs.rootId
             && lhs.fileSize == rhs.fileSize
             && lhs.modifiedAt == rhs.modifiedAt
+            && lhs.createdAt == rhs.createdAt
             && lhs.durationSec == rhs.durationSec
             && lhs.sampleRate == rhs.sampleRate
             && lhs.bitDepth == rhs.bitDepth

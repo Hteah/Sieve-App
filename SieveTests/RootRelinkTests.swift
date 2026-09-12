@@ -24,7 +24,7 @@ struct RootRelinkTests {
             try root.insert(d)
             let now = Date()
             for path in ["Kicks/Big.wav", "Snares/Snap.wav"] {
-                var s = Sample(rootId: root.id!, relativePath: path, fileSize: 100, modifiedAt: now)
+                var s = Sample(rootId: root.id!, relativePath: path, fileSize: 100, modifiedAt: now, createdAt: now)
                 s.status = .unavailable
                 s.indexedAt = now
                 try s.insert(d)

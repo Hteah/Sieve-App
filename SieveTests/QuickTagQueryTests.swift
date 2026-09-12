@@ -12,7 +12,7 @@ struct QuickTagQueryTests {
             try root.insert(d)
             let now = Date()
             for (path, hash) in [("a.wav", "ha"), ("b.wav", "hb"), ("c.wav", "hc")] {
-                var s = Sample(rootId: root.id!, relativePath: path, fileSize: 100, modifiedAt: now)
+                var s = Sample(rootId: root.id!, relativePath: path, fileSize: 100, modifiedAt: now, createdAt: now)
                 s.audioHash = hash
                 s.indexedAt = now
                 try s.insert(d)

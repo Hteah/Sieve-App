@@ -62,6 +62,7 @@ struct SampleListView: View {
         ("bits", 490),
         ("rating", 580),
         ("quickTag", 630),
+        ("created", 690),
         ("size", 300),   // low threshold: keep Size visible at any real pane width
     ]
 
@@ -162,6 +163,10 @@ struct SampleListView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .width(min: 60, ideal: 96, max: 160).customizationID("quickTag")
+                TableColumn("Date Created", value: \.createdAt) { row in
+                    Text(Fmt.date(row.createdAt)).foregroundStyle(.secondary)
+                }
+                .width(min: 76, ideal: 90).customizationID("created")
                 TableColumn("Size", value: \.fileSize) { row in
                     Text(Fmt.bytes(row.fileSize)).monospacedDigit()
                 }
@@ -275,6 +280,7 @@ struct SampleListView: View {
                 case .name, .path, .modified: KeyPathComparator(\.filenameSortKey, order: order)
                 case .duration: KeyPathComparator(\.durationSortKey, order: order)
                 case .size: KeyPathComparator(\.fileSize, order: order)
+                case .created: KeyPathComparator(\.createdAt, order: order)
                 case .rating: KeyPathComparator(\.ratingSortKey, order: order)
                 case .rate: KeyPathComparator(\.rateSortKey, order: order)
                 case .bits: KeyPathComparator(\.bitsSortKey, order: order)
@@ -291,6 +297,7 @@ struct SampleListView: View {
                 else if kp == \SampleRow.bitsSortKey { field = .bits }
                 else if kp == \SampleRow.ratingSortKey { field = .rating }
                 else if kp == \SampleRow.fileSize { field = .size }
+                else if kp == \SampleRow.createdAt { field = .created }
                 else if kp == \SampleRow.ext { field = .format }
                 else { field = .name }
                 if field == model.filter.sort {
@@ -333,6 +340,10 @@ struct SampleListView: View {
         .simultaneousGesture(TapGesture().onEnded {
             selectRow(row, modifiers: NSEvent.modifierFlags)
         })
+        // Grows the loaded window once the last few loaded rows scroll into view — see
+        // `LibraryViewModel.loadMoreIfNeeded`. A large scope only ever loads a bounded page at a
+        // time, so a sort/filter change never has to rebuild more than that many rows.
+        .onAppear { model.loadMoreIfNeeded(near: row) }
         .draggable(SampleDrag(id: row.id,
                               fileURL: env.fileURL(for: row),
                               rootURL: env.rootURL(for: row.rootId),
@@ -412,7 +423,14 @@ struct SampleListView: View {
 
     private var statusBar: some View {
         HStack(spacing: 8) {
-            Text("\(model.rows.count) samples").font(.caption).foregroundStyle(.secondary)
+            // `rows` is only ever the loaded window (see LibraryViewModel pagination) — show the
+            // true scope size, and how much of it is loaded while more is still to come.
+            if model.hasMoreRows {
+                Text("\(model.rows.count) of \(model.totalCount) samples loaded")
+                    .font(.caption).foregroundStyle(.secondary)
+            } else {
+                Text("\(model.totalCount) samples").font(.caption).foregroundStyle(.secondary)
+            }
             if !model.selection.isEmpty {
                 Text("· \(model.selection.count) selected").font(.caption).foregroundStyle(.secondary)
             }

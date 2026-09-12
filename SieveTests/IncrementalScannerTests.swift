@@ -12,9 +12,9 @@ struct IncrementalScannerTests {
             "gone.wav": IndexedEntry(id: 3, fileSize: 30, modifiedAt: d0, status: .present),
         ]
         let found = [
-            FileEntry(relativePath: "a.wav", fileSize: 10, modifiedAt: d0),
-            FileEntry(relativePath: "b.wav", fileSize: 21, modifiedAt: d0),
-            FileEntry(relativePath: "new/c.wav", fileSize: 5, modifiedAt: d0),
+            FileEntry(relativePath: "a.wav", fileSize: 10, modifiedAt: d0, createdAt: d0),
+            FileEntry(relativePath: "b.wav", fileSize: 21, modifiedAt: d0, createdAt: d0),
+            FileEntry(relativePath: "new/c.wav", fileSize: 5, modifiedAt: d0, createdAt: d0),
         ]
         let diff = IncrementalScanner.diff(existing: existing, found: found)
         #expect(diff.unchanged == [1])
@@ -25,13 +25,13 @@ struct IncrementalScannerTests {
 
     @Test func subSecondTimestampDriftIsUnchanged() {
         let existing = ["a.wav": IndexedEntry(id: 1, fileSize: 10, modifiedAt: d0, status: .present)]
-        let found = [FileEntry(relativePath: "a.wav", fileSize: 10, modifiedAt: d0.addingTimeInterval(0.4))]
+        let found = [FileEntry(relativePath: "a.wav", fileSize: 10, modifiedAt: d0.addingTimeInterval(0.4), createdAt: d0)]
         #expect(IncrementalScanner.diff(existing: existing, found: found).unchanged == [1])
     }
 
     @Test func missingFileThatReappearsIsUnchanged() {
         let existing = ["a.wav": IndexedEntry(id: 1, fileSize: 10, modifiedAt: d0, status: .missing)]
-        let found = [FileEntry(relativePath: "a.wav", fileSize: 10, modifiedAt: d0)]
+        let found = [FileEntry(relativePath: "a.wav", fileSize: 10, modifiedAt: d0, createdAt: d0)]
         let diff = IncrementalScanner.diff(existing: existing, found: found)
         #expect(diff.unchanged == [1] && diff.removed.isEmpty)
     }

@@ -195,6 +195,28 @@ final class AppDatabase: Sendable {
             }
         }
 
+        m.registerMigration("v5-created-at") { db in
+            try db.alter(table: "sample") { t in
+                t.add(column: "createdAt", .datetime)
+            }
+            // No real creation date on file for rows indexed before this migration; modifiedAt
+            // is the closest available stand-in until the next scan touches the file (a fresh
+            // "added" row always gets the real on-disk creation date — see FileEnumerator).
+            try db.execute(sql: "UPDATE sample SET createdAt = modifiedAt")
+            // `sample_with_annotation` selects `s.*`, so it picks up the new column with no
+            // view change needed — SQLite re-expands `*` against the table's current schema.
+        }
+
+        m.registerMigration("v6-sort-indexes") { db in
+            // The list pane's paginated queries (LibraryViewModel) do `ORDER BY <sort column>
+            // LIMIT pageSize` — with an index, SQLite can walk it straight to the first page
+            // instead of sorting the whole table first. Matters most for a large, unfiltered
+            // scope ("All") on these columns, which is exactly the case that used to hang the UI.
+            try db.create(index: "sample_modifiedAt", on: "sample", columns: ["modifiedAt"])
+            try db.create(index: "sample_createdAt", on: "sample", columns: ["createdAt"])
+            try db.create(index: "sample_fileSize", on: "sample", columns: ["fileSize"])
+        }
+
         return m
     }
 }

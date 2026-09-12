@@ -80,7 +80,7 @@ struct AudioConverterTests {
         let db = try AppDatabase.inMemory()
         let store = AnnotationStore(database: db)
         let old = SampleRow(id: 1, rootId: 1, relativePath: "a.wav", filename: "a.wav", parentDir: "",
-                            ext: "wav", fileSize: 1, modifiedAt: .init(), audioHash: "OLD", fileHash: nil,
+                            ext: "wav", fileSize: 1, modifiedAt: .init(), createdAt: .init(), audioHash: "OLD", fileHash: nil,
                             durationSec: 1, sampleRate: 96_000, channels: 2, bitDepth: 24, formatName: "WAV PCM",
                             bpm: nil, musicalKey: nil, waveform: nil, peakDb: nil, rmsDb: nil, clippedSamples: nil,
                             status: .present, rating: nil, isFavorite: nil, quickTags: nil, tagNames: nil)
@@ -90,7 +90,7 @@ struct AudioConverterTests {
         try await store.carryOverAnnotation(from: "OLD", to: "NEW", rootId: 1, relativePath: "a.wav")
 
         let moved = SampleRow(id: 1, rootId: 1, relativePath: "a.wav", filename: "a.wav", parentDir: "",
-                              ext: "wav", fileSize: 1, modifiedAt: .init(), audioHash: "NEW", fileHash: nil,
+                              ext: "wav", fileSize: 1, modifiedAt: .init(), createdAt: .init(), audioHash: "NEW", fileHash: nil,
                               durationSec: 1, sampleRate: 48_000, channels: 2, bitDepth: 16, formatName: "WAV PCM",
                               bpm: nil, musicalKey: nil, waveform: nil, peakDb: nil, rmsDb: nil, clippedSamples: nil,
                               status: .present, rating: nil, isFavorite: nil, quickTags: nil, tagNames: nil)
