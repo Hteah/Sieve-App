@@ -55,6 +55,8 @@ struct SidebarView: View {
     /// Sidebar row selection. One entry drives the browse scope (`model.filter.scope`); ⇧/⌘-click
     /// a run of folder rows to select several at once for batch actions like "Move to Group".
     @State private var selection: Set<LibraryScope> = []
+    /// Where the selected sample(s) live — recomputed on selection change, not per row.
+    @State private var selectionLocation = SelectionLocation()
 
     private struct MoveHereRequest: Identifiable {
         let id = UUID()
@@ -201,6 +203,8 @@ struct SidebarView: View {
         .onChange(of: model.filter.scope, initial: true) { _, s in
             if selection.count <= 1 { selection = [s] }
         }
+        .onChange(of: selectedFolderKeys, initial: true) { selectionLocation = computeSelectionLocation() }
+        .onChange(of: model.roots) { selectionLocation = computeSelectionLocation() }
         // First-run bootstrap only: a brand new install has no persisted collapse state at all
         // (collapsedFolderGroups isn't in UserDefaults yet), so start decluttered rather than
         // picking an arbitrary group to leave open. Waits for model.groups' first non-empty
@@ -258,7 +262,11 @@ struct SidebarView: View {
             DisclosureGroup {
                 OutlineGroup(model.folderTrees[id] ?? [], children: \.childrenOrNil) { node in
                     let key = "n:\(node.rootId):\(node.path)"
-                    Label(node.name, systemImage: "folder")
+                    HStack(spacing: 6) {
+                        Label(node.name, systemImage: "folder")
+                        Spacer(minLength: 0)
+                        locationMarker(rootId: node.rootId, path: node.path)
+                    }
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.vertical, 1).padding(.horizontal, 3)
                         .background { dropHighlight(key) }
@@ -325,6 +333,7 @@ struct SidebarView: View {
                 .help(root.isAvailable ? "Available" : "Volume not mounted")
             Label(root.name, systemImage: "externaldrive")
             Spacer()
+            locationMarker(rootId: id, path: "")
             if env.scanState.activeRoots[id] != nil {
                 ProgressView().controlSize(.mini)
             } else {
@@ -356,6 +365,7 @@ struct SidebarView: View {
         return HStack(spacing: 6) {
             Label(group.name, systemImage: "folder.fill")
             Spacer()
+            if selectionLocation.groups.contains(id) { locationDot(filled: false) }
             Text("\(count)").font(.caption).foregroundStyle(.secondary)
         }
         .contextMenu {
@@ -367,6 +377,59 @@ struct SidebarView: View {
                 Task { try? await groupStore.delete(id: id) }
             }
         }
+    }
+
+    // MARK: Selection location
+
+    /// Where the selected sample(s) live, so the sidebar can point at their folder even while
+    /// the list is browsing somewhere broader (All Samples, a tag, a search) or the folder is
+    /// tucked inside a collapsed group / root.
+    private struct SelectionLocation {
+        /// `rootId:parentDir` of each folder that directly holds a selected sample ("" = the root).
+        var folders: Set<String> = []
+        /// Every folder on the way down to those, root included — the breadcrumb trail.
+        var trail: Set<String> = []
+        var groups: Set<Int64> = []
+    }
+
+    /// `rootId:parentDir` of each selected sample; changes when the selection does, or when a
+    /// selected sample is moved to another folder.
+    private var selectedFolderKeys: [String] {
+        model.selectedRows.map { "\($0.rootId):\($0.parentDir)" }
+    }
+
+    private func computeSelectionLocation() -> SelectionLocation {
+        var loc = SelectionLocation()
+        for row in model.selectedRows {
+            loc.folders.insert("\(row.rootId):\(row.parentDir)")
+            loc.trail.insert("\(row.rootId):")
+            var path = ""
+            for comp in row.parentDir.split(separator: "/") {
+                path = path.isEmpty ? String(comp) : path + "/" + comp
+                loc.trail.insert("\(row.rootId):\(path)")
+            }
+            if let gid = model.roots.first(where: { $0.id == row.rootId })?.groupId { loc.groups.insert(gid) }
+        }
+        return loc
+    }
+
+    /// Filled dot on the folder holding the selected sample; hollow ring on each row above it,
+    /// so a collapsed group or root still shows which way to open.
+    @ViewBuilder
+    private func locationMarker(rootId: Int64, path: String) -> some View {
+        let key = "\(rootId):\(path)"
+        if selectionLocation.folders.contains(key) {
+            locationDot(filled: true)
+        } else if selectionLocation.trail.contains(key) {
+            locationDot(filled: false)
+        }
+    }
+
+    private func locationDot(filled: Bool) -> some View {
+        Image(systemName: filled ? "circle.fill" : "circle")
+            .font(.system(size: 7, weight: .bold))
+            .foregroundStyle(palette.accent)
+            .help(filled ? "The selected sample is in this folder" : "The selected sample is inside this")
     }
 
     // MARK: Helpers

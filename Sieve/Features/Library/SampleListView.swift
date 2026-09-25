@@ -339,6 +339,9 @@ struct SampleListView: View {
         // current (sorted) order — same as Finder/List.
         .simultaneousGesture(TapGesture().onEnded {
             selectRow(row, modifiers: NSEvent.modifierFlags)
+            // Take keyboard focus too, like the waveform click does — otherwise, after clicking in
+            // the sidebar, the row is selected but drawn in the unfocused grey, not the accent.
+            listFocused = true
         })
         // Grows the loaded window once the last few loaded rows scroll into view — see
         // `LibraryViewModel.loadMoreIfNeeded`. A large scope only ever loads a bounded page at a
