@@ -425,8 +425,8 @@ struct EditorWaveformView: View {
                         if showDots { dots.addEllipse(in: CGRect(x: x - 2, y: y - 2, width: 4, height: 4)) }
                     }
                 }
-                ctx.stroke(line, with: .color(accent), lineWidth: 1.6)
-                if showDots { ctx.fill(dots, with: .color(accent)) }
+                ctx.stroke(line, with: .color(palette.waveform), lineWidth: 1.6)
+                if showDots { ctx.fill(dots, with: .color(palette.waveform)) }
             } else {
                 var wave = Path()
                 for px in 0..<columns {
@@ -469,13 +469,13 @@ struct EditorWaveformView: View {
                     wave.move(to: CGPoint(x: x, y: mid - CGFloat(hi) * half))
                     wave.addLine(to: CGPoint(x: x, y: mid - CGFloat(lo) * half))
                 }
-                ctx.stroke(wave, with: .color(accent), lineWidth: 1)
+                ctx.stroke(wave, with: .color(palette.waveform), lineWidth: 1)
             }
 
             var zero = Path()
             zero.move(to: CGPoint(x: 0, y: mid))
             zero.addLine(to: CGPoint(x: size.width, y: mid))
-            ctx.stroke(zero, with: .color(.secondary.opacity(0.25)), lineWidth: 0.5)
+            ctx.stroke(zero, with: .color(palette.zeroLine), lineWidth: 0.5)
 
             if lanes > 1, c < lanes - 1 {
                 var sep = Path()
@@ -512,7 +512,7 @@ struct EditorWaveformView: View {
             var line = Path()
             line.move(to: CGPoint(x: x, y: 0))
             line.addLine(to: CGPoint(x: x, y: plotH))
-            ctx.stroke(line, with: .color(.primary), lineWidth: 1)
+            ctx.stroke(line, with: .color(palette.playhead), lineWidth: 1)
         }
 
         if showsTimeRuler {

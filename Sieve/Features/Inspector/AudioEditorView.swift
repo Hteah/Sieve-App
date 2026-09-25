@@ -6,6 +6,7 @@ import SwiftUI
 struct AudioEditorView: View {
     @Environment(AppEnvironment.self) private var env
     @Environment(\.openWindow) private var openWindow
+    @Environment(\.palette) private var palette
 
     /// The currently selected sample, so the Edit tab can load it on first appearance.
     /// `nil` in the pop-out window (which just shows whatever the session already has).
@@ -92,11 +93,11 @@ struct AudioEditorView: View {
             VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: 5) {
                     if session.isDirty {
-                        Circle().fill(.orange).frame(width: 7, height: 7)
+                        Circle().fill(palette.unsaved).frame(width: 7, height: 7)
                     }
                     Text(session.source?.url.lastPathComponent ?? "").font(.headline).lineLimit(1)
                     if session.isDirty {
-                        Text("· unsaved").font(.caption).foregroundStyle(.orange)
+                        Text("· unsaved").font(.caption).foregroundStyle(palette.unsaved)
                     }
                 }
                 Text(readout).font(.caption).foregroundStyle(.secondary)
@@ -228,15 +229,15 @@ struct AudioEditorView: View {
         let recorder = session.recorder
         if recorder.isRecording {
             Image(systemName: "waveform", variableValue: Double(min(1, max(0, recorder.level))))
-                .foregroundStyle(.red)
+                .foregroundStyle(palette.record)
                 .symbolEffect(.pulse, isActive: true)
             Text(Self.mmss(recorder.elapsed))
-                .font(.caption).monospacedDigit().foregroundStyle(.red)
+                .font(.caption).monospacedDigit().foregroundStyle(palette.record)
         }
         Button { session.toggleRecording() } label: {
             Image(systemName: recorder.isRecording ? "stop.fill" : "record.circle")
         }
-        .tint(.red)
+        .tint(palette.record)
         .infoBubble(recorder.isRecording ? "Stop recording" : "Record the editor's playback to a new WAV")
     }
 

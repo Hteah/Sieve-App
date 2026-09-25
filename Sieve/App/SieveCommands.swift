@@ -21,6 +21,10 @@ struct SieveCommands: Commands {
                 .keyboardShortcut("y", modifiers: [.command])
             Button("Purge Missing Samples") { Task { await env.scanner.purgeMissing() } }
         }
+        // Sieve ▸ Theme…, under Settings — the theme editor shared with R3WRK has its own window.
+        CommandGroup(after: .appSettings) {
+            Button("Theme…") { openWindow(id: "theme") }
+        }
         CommandGroup(after: .sidebar) {
             Toggle("Show Control Info", isOn: $showControlInfo)
         }

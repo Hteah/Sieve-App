@@ -8,7 +8,7 @@ struct WaveformView: View {
     var onSeek: ((Double) -> Void)? = nil
 
     @Environment(\.palette) private var palette
-    private var accent: Color { palette.accent }
+    private var accent: Color { palette.waveform }
 
     var body: some View {
         Canvas(rendersAsynchronously: true) { ctx, size in

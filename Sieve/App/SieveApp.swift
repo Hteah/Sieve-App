@@ -5,12 +5,13 @@ struct SieveApp: App {
     @State private var env = AppEnvironment.live()
 
     init() {
-        // First-launch: a touch brighter, inspector collapsed. The colour palette has its own
-        // defaults (see `CustomPalette.defaults`). `register` only fills keys the user hasn't set.
+        // First-launch: a touch brighter, inspector collapsed. The colour theme has its own
+        // default (see `Palette.default`). `register` only fills keys the user hasn't set.
         UserDefaults.standard.register(defaults: [
             "appBrightness": 0.47,
             "showInspector": false,
         ])
+        ThemeLibrary.migrateLegacySettings()
     }
 
     var body: some Scene {
@@ -41,6 +42,13 @@ struct SieveApp: App {
                 .modifier(Themed())
         }
         .defaultSize(width: 900, height: 480)
+
+        Window("Theme", id: "theme") {
+            ThemeWindow()
+                .environment(env)
+                .modifier(Themed())
+        }
+        .windowResizability(.contentSize)
 
         Settings {
             SettingsView()

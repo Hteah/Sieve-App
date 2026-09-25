@@ -47,6 +47,9 @@ targets:
         com.apple.security.app-sandbox: true
         com.apple.security.files.user-selected.read-write: true
         com.apple.security.files.bookmarks.app-scope: true
+        # The theme library shared with R3WRK (see ThemeLibrary in SharedTheme.swift).
+        com.apple.security.temporary-exception.files.home-relative-path.read-write:
+          - /Library/Application Support/Shared Themes/
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.arlo.Sieve
