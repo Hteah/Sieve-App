@@ -21,9 +21,11 @@ struct SieveCommands: Commands {
                 .keyboardShortcut("y", modifiers: [.command])
             Button("Purge Missing Samples") { Task { await env.scanner.purgeMissing() } }
         }
-        // Sieve ▸ Theme…, under Settings — the theme editor shared with R3WRK has its own window.
+        // Sieve ▸ Theme… / Quick Tags…, under Settings — each has its own window, to keep
+        // Settings short.
         CommandGroup(after: .appSettings) {
             Button("Theme…") { openWindow(id: "theme") }
+            Button("Quick Tags…") { openWindow(id: "quick-tags") }
         }
         CommandGroup(after: .sidebar) {
             Toggle("Show Control Info", isOn: $showControlInfo)

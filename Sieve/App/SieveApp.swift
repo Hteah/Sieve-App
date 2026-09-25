@@ -50,6 +50,13 @@ struct SieveApp: App {
         }
         .windowResizability(.contentSize)
 
+        Window("Quick Tags", id: "quick-tags") {
+            QuickTagsWindow()
+                .environment(env)
+                .modifier(Themed())
+        }
+        .windowResizability(.contentSize)
+
         Settings {
             SettingsView()
                 .environment(env)
