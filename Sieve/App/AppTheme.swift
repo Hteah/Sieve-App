@@ -65,6 +65,7 @@ enum CustomPalette {
         ("Neutral Grey",           "#616161", "#3A3A3A", "#4E4E4E", "#F5B854"),
         ("Slate Blue",             "#2E3440", "#21252E", "#262B36", "#88C0D0"),
         ("Warm Graphite",          "#3A3736", "#262322", "#302C2B", "#E0A24E"),
+        ("Soft Grey",              "#46464B", "#66666A", "#363636", "#E7EAEC"),
     ]
 
     static var defaultPalette: Palette {
