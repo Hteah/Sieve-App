@@ -56,6 +56,8 @@ final class LibraryViewModel {
     @ObservationIgnored private var sidebarTask: Task<Void, Never>?
     @ObservationIgnored private var searchDebounce: Task<Void, Never>?
     @ObservationIgnored private var pageLimit = LibraryViewModel.pageSize
+    /// Set by `selectAll()` while the rest of the scope loads; the next rows delivery selects it all.
+    @ObservationIgnored private var selectAllPending = false
 
     init(database: AppDatabase) {
         self.database = database
@@ -100,6 +102,19 @@ final class LibraryViewModel {
         restartRowsObservation(resetPage: false)
     }
 
+    /// Selects every sample in the current view, not just the loaded page: selection is pruned
+    /// to loaded rows, so when more exist the window grows to the full count first and the
+    /// selection lands with that delivery.
+    func selectAll() {
+        guard hasMoreRows else {
+            selection = Set(rows.map(\.id))
+            return
+        }
+        selectAllPending = true
+        pageLimit = max(pageLimit, totalCount + 1)
+        restartRowsObservation(resetPage: false)
+    }
+
     // MARK: Observation
 
     /// (Re)starts the rows observation for the current filter, bounded to `pageLimit` rows.
@@ -109,7 +124,7 @@ final class LibraryViewModel {
     /// at all is the `Table` rendering the result, not the database read.
     private func restartRowsObservation(resetPage: Bool) {
         rowsTask?.cancel()
-        if resetPage { pageLimit = Self.pageSize }
+        if resetPage { pageLimit = Self.pageSize; selectAllPending = false }
         let limit = pageLimit
         let request = Queries.request(for: filter, limit: limit)
         isLoading = true
@@ -123,7 +138,12 @@ final class LibraryViewModel {
                     self.isLoading = false
                     // Drop selection entries that no longer exist.
                     let ids = Set(rows.map(\.id))
-                    if !self.selection.isSubset(of: ids) { self.selection.formIntersection(ids) }
+                    if self.selectAllPending {
+                        self.selectAllPending = false
+                        self.selection = ids
+                    } else if !self.selection.isSubset(of: ids) {
+                        self.selection.formIntersection(ids)
+                    }
                 }
             } catch {
                 Self.log.error("rows observation failed: \(error, privacy: .public)")

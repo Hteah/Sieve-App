@@ -477,6 +477,9 @@ struct SampleListView: View {
     private func rowMenu(for rows: [SampleRow]) -> some View {
         if let first = rows.first {
             let hasPresent = rows.contains { $0.status == .present }
+            Button(model.totalCount > 1 ? "Select All (\(model.totalCount))" : "Select All") { model.selectAll() }
+                .disabled(model.selection.count == model.totalCount)
+            Divider()
             Button("Reveal in Finder") { env.revealInFinder(first) }
             Button("Open in External Editor") { env.openInAudioEditor(first) }
                 .help(env.audioEditorName.map { "Send this sample to \($0)" }
