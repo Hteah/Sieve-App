@@ -91,7 +91,7 @@ struct SampleListView: View {
         Table(model.rows, selection: $model.selection, sortOrder: sortComparators,
               columnCustomization: $columnCustomization) {
                 TableColumn("Waveform") { row in
-                    WaveformCell(row: row) { fraction in
+                    WaveformCell(env: env, row: row) { fraction in
                         model.selection = [row.id]
                         if browsePreview {
                             env.preview(row)                       // browse mode: always from the top
@@ -606,7 +606,10 @@ struct SampleDrag: Transferable, Identifiable {
 }
 
 struct WaveformCell: View {
-    @Environment(AppEnvironment.self) private var env
+    /// Passed in, not read from `@Environment`: the Table's drag container re-renders dragged cells
+    /// for the drag image outside the window's environment, and an `@Environment(AppEnvironment.self)`
+    /// lookup there is a fatal "No Observable object" assertion.
+    let env: AppEnvironment
     let row: SampleRow
     var onSeek: ((Double) -> Void)? = nil
 
