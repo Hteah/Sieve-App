@@ -21,6 +21,7 @@ struct SampleListView: View {
     @State private var deferredWidth: CGFloat?
     @State private var convertRequest: ConvertRequest?
     @State private var moveRequest: MoveRequest?
+    @State private var importRequest: FinderImportRequest?
     @State private var deleteRequest: DeleteRequest?
     @State private var listDropTargeted = false
     // A tap on a row's waveform runs a DragGesture inside the Table cell, which knocks
@@ -247,7 +248,7 @@ struct SampleListView: View {
             // folder this window is scoped to. Catcher sits behind the Table.
             .background {
                 if dropScopeFolder != nil {
-                    SampleDropCatcher(onTargeted: { listDropTargeted = $0 }, onDrop: handleListDrop)
+                    SampleDropCatcher(acceptsFiles: true, onTargeted: { listDropTargeted = $0 }, onDrop: handleListDrop)
                 }
             }
             .overlay {
@@ -260,6 +261,9 @@ struct SampleListView: View {
             }
             .sheet(item: $convertRequest) { req in
                 BatchConvertSheet(model: model, rows: req.rows)
+            }
+            .sheet(item: $importRequest) { req in
+                FinderImportSheet(request: req)
             }
             .sheet(item: $moveRequest) { req in
                 MoveToFolderSheet(model: model, rows: req.rows, destination: req.destination,
@@ -520,22 +524,31 @@ struct SampleListView: View {
 
     /// The folder this window's list is scoped to, if it's a single root or sub-folder — the drop
     /// destination when samples are dragged onto the list. `here` filters out rows already there.
-    private var dropScopeFolder: (dest: URL, here: (SampleRow) -> Bool)? {
+    private var dropScopeFolder: (dest: URL, rootId: Int64, rootURL: URL, here: (SampleRow) -> Bool)? {
         switch model.filter.scope {
         case .root(let id):
             guard let u = env.rootURL(for: id) else { return nil }
-            return (u, { $0.rootId == id && $0.parentDir.isEmpty })
+            return (u, id, u, { $0.rootId == id && $0.parentDir.isEmpty })
         case .folder(let rootId, let parentDir):
             guard let u = env.rootURL(for: rootId) else { return nil }
-            return (u.appending(path: parentDir), { $0.rootId == rootId && $0.parentDir == parentDir })
+            return (u.appending(path: parentDir), rootId, u, { $0.rootId == rootId && $0.parentDir == parentDir })
         default:
             return nil
         }
     }
 
-    /// Samples were dropped on the list — copy or move them into the folder this window is scoped to.
-    private func handleListDrop(_ ids: [Int64]) -> Bool {
-        guard let (dest, here) = dropScopeFolder, !ids.isEmpty else { return false }
+    /// Samples or Finder files were dropped on the list — copy or move them into the folder this
+    /// window is scoped to.
+    private func handleListDrop(_ payload: SampleDropPayload) -> Bool {
+        guard let (dest, rootId, rootURL, here) = dropScopeFolder else { return false }
+        let ids: [Int64]
+        switch payload {
+        case .samples(let s): ids = s
+        case .files(let urls):
+            importRequest = FinderImportRequest(items: urls, destination: dest, rootId: rootId, rootURL: rootURL)
+            return true
+        }
+        guard !ids.isEmpty else { return false }
         Task { @MainActor in
             let rows = await fetchSampleRows(ids, from: env.database)
                 .filter { $0.status == .present && !here($0) }
@@ -815,6 +828,116 @@ struct MoveToFolderSheet: View {
             var roots = copy ? Set<Int64>() : Set(targets.map(\.rootId))
             if let destRoot = env.rootId(containing: destination) { roots.insert(destRoot) }
             for id in roots { await env.scanner.scan(rootId: id) }
+        }
+    }
+}
+
+/// Files / folders dragged in from Finder onto a folder in Sieve.
+struct FinderImportRequest: Identifiable {
+    let id = UUID()
+    let items: [URL]
+    let destination: URL
+    let rootId: Int64
+    let rootURL: URL
+}
+
+/// Confirms and runs a Finder → Sieve drop: Copy (default) or Move the dropped files and folders
+/// into the target folder, then rescans that root so they show up in the list.
+struct FinderImportSheet: View {
+    @Environment(AppEnvironment.self) private var env
+    @Environment(\.dismiss) private var dismiss
+    let request: FinderImportRequest
+
+    @State private var copying = true
+    @State private var phase: Phase = .confirm
+    @State private var results: [FinderImport.Result] = []
+
+    enum Phase { case confirm, working, done }
+
+    private var verb: String { copying ? "Copy" : "Move" }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            switch phase {
+            case .confirm: confirmView
+            case .working: ProgressView(copying ? "Copying…" : "Moving…").frame(maxWidth: .infinity, minHeight: 80)
+            case .done: doneView
+            }
+        }
+        .padding(20)
+        .frame(width: 460)
+    }
+
+    private var confirmView: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Picker("", selection: $copying) {
+                Text("Copy").tag(true)
+                Text("Move").tag(false)
+            }
+            .pickerStyle(.segmented).labelsHidden().fixedSize()
+            Text("\(verb) \(request.items.count) item\(request.items.count == 1 ? "" : "s")").font(.headline)
+            Text("into \u{201C}\(request.destination.lastPathComponent)\u{201D}")
+                .font(.callout).foregroundStyle(.secondary)
+                .lineLimit(1).truncationMode(.middle)
+            List(request.items, id: \.self) { url in
+                HStack {
+                    Image(systemName: url.hasDirectoryPath ? "folder" : "waveform")
+                        .foregroundStyle(.secondary)
+                    Text(url.lastPathComponent)
+                    Spacer()
+                    Text(url.deletingLastPathComponent().lastPathComponent)
+                        .foregroundStyle(.secondary).font(.caption)
+                }
+            }
+            .frame(minHeight: 140, maxHeight: 300)
+            Text(copying
+                 ? "The originals stay where they are. Folders are copied with everything inside. A name clash gets a \u{201C} (2)\u{201D} suffix."
+                 : "The files leave their current folder. Folders are moved with everything inside. A name clash gets a \u{201C} (2)\u{201D} suffix.")
+                .font(.caption).foregroundStyle(.secondary)
+            HStack {
+                Spacer()
+                Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
+                Button(verb) { run() }.keyboardShortcut(.defaultAction)
+            }
+        }
+    }
+
+    private var doneView: some View {
+        let failed = results.filter { !$0.succeeded }
+        let done = copying ? "copied" : "moved"
+        return VStack(alignment: .leading, spacing: 12) {
+            Text(failed.isEmpty
+                 ? "\(copying ? "Copied" : "Moved") \(results.count) item\(results.count == 1 ? "" : "s")"
+                 : "\(results.count - failed.count) \(done), \(failed.count) failed")
+                .font(.headline)
+            if !failed.isEmpty {
+                List(failed) { f in
+                    VStack(alignment: .leading) {
+                        Text(f.name)
+                        Text(f.error ?? "").font(.caption).foregroundStyle(.red)
+                    }
+                }
+                .frame(minHeight: 100, maxHeight: 220)
+            }
+            HStack { Spacer(); Button("Done") { dismiss() }.keyboardShortcut(.defaultAction) }
+        }
+    }
+
+    private func run() {
+        phase = .working
+        let req = request
+        let move = !copying
+        Task {
+            results = await Task.detached {
+                FinderImport.run(req.items, into: req.destination, rootURL: req.rootURL, move: move)
+            }.value
+            phase = .done
+            await env.scanner.scan(rootId: req.rootId)
+            // A move out of another indexed folder leaves its rows behind — rescan those too.
+            if move {
+                let sources = Set(req.items.compactMap { env.rootId(containing: $0) }).subtracting([req.rootId])
+                for id in sources { await env.scanner.scan(rootId: id) }
+            }
         }
     }
 }

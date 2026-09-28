@@ -51,6 +51,9 @@ struct SidebarView: View {
     @State private var quickTagIconSlot: Int?
     @State private var quickTagNameDraft = ""
     @State private var moveHere: MoveHereRequest?
+    @State private var importHere: FinderImportRequest?
+    /// A Finder folder drag is over empty sidebar space — drop adds it to the library.
+    @State private var addFolderTargeted = false
     /// Folder row a sample drag is hovering, keyed `r:<id>` / `n:<rootId>:<path>`.
     @State private var dropHoverKey: String?
     /// Sidebar row selection. One entry drives the browse scope (`model.filter.scope`); ⇧/⌘-click
@@ -198,6 +201,24 @@ struct SidebarView: View {
         }
         .listStyle(.sidebar)
         .themedSurface(palette)
+        // Finder folders dropped anywhere that isn't a folder row are added to the library, like
+        // Add Folder…. Sits behind the List; folder rows' own catchers take drops over them.
+        .background {
+            SampleDropCatcher(acceptsSamples: false, acceptsFiles: true,
+                              onTargeted: { addFolderTargeted = $0 },
+                              onDrop: { payload in
+                                  guard case .files(let urls) = payload else { return false }
+                                  return addDroppedFolders(urls)
+                              })
+        }
+        .overlay {
+            if addFolderTargeted {
+                RoundedRectangle(cornerRadius: 4)
+                    .strokeBorder(Color.accentColor, lineWidth: 2)
+                    .padding(1)
+                    .allowsHitTesting(false)
+            }
+        }
         // Keep the single-select case wired to the browse scope, both ways. A multi-select
         // (>1 folder rows) is left alone so the centre pane keeps showing the last folder.
         .onChange(of: selection) { _, sel in
@@ -252,6 +273,9 @@ struct SidebarView: View {
             Button("Cancel", role: .cancel) { groupSheet = nil }
             Button(sheet.isRename ? "Rename" : "Create") { commitGroupSheet(sheet) }
         }
+        .sheet(item: $importHere) { req in
+            FinderImportSheet(request: req)
+        }
         .sheet(item: $moveHere) { req in
             MoveToFolderSheet(model: model, rows: req.rows, destination: req.destination,
                               offerCopy: req.offerCopy)
@@ -295,15 +319,44 @@ struct SidebarView: View {
 
     private func folderDropCatcher(key: String, rootId: Int64, subpath: String) -> some View {
         SampleDropCatcher(
+            acceptsFiles: true,
             onTargeted: { over in
                 if over { dropHoverKey = key } else if dropHoverKey == key { dropHoverKey = nil }
             },
-            onDrop: { ids in
+            onDrop: { payload in
                 guard let root = env.rootURL(for: rootId) else { return false }
                 let dest = subpath.isEmpty ? root : root.appending(path: subpath)
-                return acceptDrop(ids, into: dest) { $0.rootId == rootId && $0.parentDir == subpath }
+                switch payload {
+                case .samples(let ids):
+                    return acceptDrop(ids, into: dest) { $0.rootId == rootId && $0.parentDir == subpath }
+                case .files(let urls):
+                    // A library folder (root) itself can't be dropped into another one — that would
+                    // leave the same files indexed twice.
+                    let items = urls.filter { !isIndexedRoot($0) }
+                    guard !items.isEmpty else { return false }
+                    importHere = FinderImportRequest(items: items, destination: dest, rootId: rootId, rootURL: root)
+                    return true
+                }
             }
         )
+    }
+
+    private func isIndexedRoot(_ url: URL) -> Bool {
+        guard let id = env.rootId(containing: url), let root = env.rootURL(for: id) else { return false }
+        return root.standardizedFileURL.path == url.standardizedFileURL.path
+    }
+
+    /// Finder folders dropped on empty sidebar space: add each one that isn't already indexed.
+    private func addDroppedFolders(_ urls: [URL]) -> Bool {
+        let folders = urls.filter { (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true }
+            .filter { env.rootId(containing: $0) == nil }
+        guard !folders.isEmpty else { return false }
+        Task {
+            for url in folders {
+                do { _ = try await env.scanner.addRoot(url: url) } catch { env.report(error) }
+            }
+        }
+        return true
     }
 
     /// Drag payload for a folder / drive row — dropped on Finder it copies the whole folder.
@@ -319,8 +372,8 @@ struct SidebarView: View {
             onTargeted: { over in
                 if over { dropHoverKey = key } else if dropHoverKey == key { dropHoverKey = nil }
             },
-            onDrop: { ids in
-                guard !ids.isEmpty else { return false }
+            onDrop: { payload in
+                guard case .samples(let ids) = payload, !ids.isEmpty else { return false }
                 Task { @MainActor in
                     let rows = await fetchSampleRows(ids, from: env.database)
                     guard !rows.isEmpty else { return }
@@ -519,62 +572,89 @@ extension Queries.FolderNode {
     var childrenOrNil: [Queries.FolderNode]? { children.isEmpty ? nil : children }
 }
 
+/// What landed on a `SampleDropCatcher`: Sieve's own sample rows (ids), or files / folders from
+/// Finder (or any app that puts plain file URLs on the pasteboard).
+enum SampleDropPayload {
+    case samples([Int64])
+    case files([URL])
+}
+
 /// AppKit drop target for a sample-row drag, placed as a `.background` behind a sidebar folder /
 /// tag row or the list pane. SwiftUI's own `.dropDestination` on `List` rows takes the hover but
 /// hands the drop an empty payload, and doesn't see drags from another window at all; reading
 /// `NSPasteboard` directly works for both. The dragged rows carry their id as plain text
 /// (`SampleDrag`); the drop handler resolves ids against the DB, since a cross-window drop lands
-/// in a window whose filtered list may not contain them.
+/// in a window whose filtered list may not contain them. With `acceptsFiles`, Finder file / folder
+/// drags are accepted too; a Sieve row drag also carries a file URL, so ids always win.
 struct SampleDropCatcher: NSViewRepresentable {
+    var acceptsSamples = true
+    var acceptsFiles = false
     var onTargeted: (Bool) -> Void
-    /// Return true to accept; ids are the dragged sample-row ids.
-    var onDrop: ([Int64]) -> Bool
+    /// Return true to accept.
+    var onDrop: (SampleDropPayload) -> Bool
 
     func makeNSView(context: Context) -> CatcherView {
         let v = CatcherView()
-        v.onTargeted = onTargeted
-        v.onDrop = onDrop
+        updateNSView(v, context: context)
         return v
     }
 
     func updateNSView(_ nsView: CatcherView, context: Context) {
         nsView.onTargeted = onTargeted
         nsView.onDrop = onDrop
+        nsView.configure(samples: acceptsSamples, files: acceptsFiles)
     }
 
     final class CatcherView: NSView {
         var onTargeted: ((Bool) -> Void)?
-        var onDrop: (([Int64]) -> Bool)?
+        var onDrop: ((SampleDropPayload) -> Bool)?
+        private var acceptsSamples = true
+        private var acceptsFiles = false
 
-        override init(frame frameRect: NSRect) {
-            super.init(frame: frameRect)
-            registerForDraggedTypes([.string])
+        func configure(samples: Bool, files: Bool) {
+            guard samples != acceptsSamples || files != acceptsFiles || registeredDraggedTypes.isEmpty else { return }
+            acceptsSamples = samples
+            acceptsFiles = files
+            unregisterDraggedTypes()
+            var types: [NSPasteboard.PasteboardType] = []
+            if samples { types.append(.string) }
+            if files { types.append(.fileURL) }
+            registerForDraggedTypes(types)
         }
-        required init?(coder: NSCoder) { fatalError("not from a nib") }
 
         // Sits *behind* the row content (`.background`), so clicks land on the SwiftUI row and this
         // view only ever sees drags. It must stay hit-testable — a `hitTest`→nil override here hides
         // it from AppKit's drag routing for drags that started in another window.
         override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
-            let ok = !Self.ids(from: sender).isEmpty
+            let ok = payload(from: sender) != nil
             onTargeted?(ok)
             return ok ? .copy : []
         }
         override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
-            Self.ids(from: sender).isEmpty ? [] : .copy
+            payload(from: sender) == nil ? [] : .copy
         }
         override func draggingExited(_ sender: NSDraggingInfo?) { onTargeted?(false) }
         override func draggingEnded(_ sender: NSDraggingInfo) { onTargeted?(false) }
         override func prepareForDragOperation(_ sender: NSDraggingInfo) -> Bool {
-            !Self.ids(from: sender).isEmpty
+            payload(from: sender) != nil
         }
         override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
             onTargeted?(false)
-            return onDrop?(Self.ids(from: sender)) ?? false
+            guard let p = payload(from: sender) else { return false }
+            return onDrop?(p) ?? false
         }
 
-        private static func ids(from sender: NSDraggingInfo) -> [Int64] {
+        private func payload(from sender: NSDraggingInfo) -> SampleDropPayload? {
             let pb = sender.draggingPasteboard
+            let ids = Self.ids(from: pb)
+            if !ids.isEmpty { return acceptsSamples ? .samples(ids) : nil }
+            guard acceptsFiles else { return nil }
+            let urls = (pb.readObjects(forClasses: [NSURL.self],
+                                       options: [.urlReadingFileURLsOnly: true]) as? [URL]) ?? []
+            return urls.isEmpty ? nil : .files(urls)
+        }
+
+        private static func ids(from pb: NSPasteboard) -> [Int64] {
             if let items = pb.pasteboardItems, !items.isEmpty {
                 let parsed = items.compactMap { $0.string(forType: .string).flatMap { Int64($0) } }
                 if !parsed.isEmpty { return parsed }

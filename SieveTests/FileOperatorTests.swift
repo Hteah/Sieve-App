@@ -164,6 +164,29 @@ struct FileOperatorTests {
         #expect(FileManager.default.fileExists(atPath: w.root.appending(path: "B/kick.wav").path))
     }
 
+    @Test func finderImportCopiesMovesAndRefusesSelfNesting() async throws {
+        let base = try Fixtures.tempDir()
+        let root = base.appending(path: "Root"), outside = base.appending(path: "Outside")
+        let pack = outside.appending(path: "Pack")
+        for d in [root, pack] { try FileManager.default.createDirectory(at: d, withIntermediateDirectories: true) }
+        try Fixtures.writeTone(to: outside.appending(path: "hat.wav"))
+        try Fixtures.writeTone(to: pack.appending(path: "snare.wav"))
+        try Fixtures.writeTone(to: root.appending(path: "hat.wav"))       // collision
+
+        let copied = FinderImport.run([outside.appending(path: "hat.wav"), pack], into: root, rootURL: root, move: false)
+        #expect(copied.allSatisfy { $0.succeeded })
+        #expect(copied[0].destination?.lastPathComponent == "hat (2).wav")
+        #expect(FileManager.default.fileExists(atPath: outside.appending(path: "hat.wav").path))   // original kept
+        #expect(FileManager.default.fileExists(atPath: root.appending(path: "Pack/snare.wav").path))
+
+        let moved = FinderImport.run([outside.appending(path: "hat.wav")], into: root, rootURL: root, move: true)
+        #expect(moved[0].succeeded)
+        #expect(!FileManager.default.fileExists(atPath: outside.appending(path: "hat.wav").path))
+
+        let nested = FinderImport.run([root], into: root.appending(path: "Pack"), rootURL: root, move: false)
+        #expect(!nested[0].succeeded)
+    }
+
     @Test func undoMovePutsFileBackAndRepaths() async throws {
         let w = try await makeWorld()
         let sample = try await groups(w.db)[0].members.first { $0.relativePath == "B/kick.wav" }!

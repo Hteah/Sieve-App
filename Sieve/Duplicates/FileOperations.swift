@@ -318,3 +318,50 @@ actor FileOperator {
         }
     }
 }
+
+/// Copies or moves files / folders dragged in from Finder into a folder inside an indexed root.
+/// These aren't indexed samples yet, so there's nothing to re-check or reconcile — the caller
+/// rescans the destination root afterwards and the scan picks them up.
+enum FinderImport {
+    struct Result: Identifiable, Sendable {
+        let id = UUID()
+        let name: String
+        var destination: URL?
+        var error: String?
+        var succeeded: Bool { error == nil }
+    }
+
+    /// `rootURL` is the indexed root that contains `destination`; its security scope is held for
+    /// the batch. Dropped URLs carry their own sandbox access from the drag.
+    static func run(_ items: [URL], into destination: URL, rootURL: URL, move: Bool,
+                    fs: any FileSystemOps = RealFileSystem()) -> [Result] {
+        let scoped = rootURL.startAccessingSecurityScopedResource()
+        defer { if scoped { rootURL.stopAccessingSecurityScopedResource() } }
+        let destPath = destination.standardizedFileURL.path
+        return items.map { item in
+            var result = Result(name: item.lastPathComponent)
+            let itemScoped = item.startAccessingSecurityScopedResource()
+            defer { if itemScoped { item.stopAccessingSecurityScopedResource() } }
+            let itemPath = item.standardizedFileURL.path
+            do {
+                guard fs.exists(item) else { throw FileOpError.missing }
+                // A folder can't go inside itself.
+                guard destPath != itemPath, !destPath.hasPrefix(itemPath + "/") else {
+                    throw CocoaError(.fileWriteInvalidFileName)
+                }
+                // Already sits in the destination: moving is a no-op, copying makes a " (2)".
+                if move, item.deletingLastPathComponent().standardizedFileURL.path == destPath {
+                    result.destination = item
+                    return result
+                }
+                let target = FileOperator.uniqueDestination(in: destination, filename: item.lastPathComponent,
+                                                            exists: fs.exists)
+                if move { try fs.move(item, to: target) } else { try fs.copy(item, to: target) }
+                result.destination = target
+            } catch {
+                result.error = error.localizedDescription
+            }
+            return result
+        }
+    }
+}
