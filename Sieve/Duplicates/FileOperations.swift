@@ -9,6 +9,7 @@ protocol FileSystemOps: Sendable {
     func trash(_ url: URL) throws
     func remove(_ url: URL) throws
     func move(_ from: URL, to: URL) throws
+    func copy(_ from: URL, to: URL) throws
 }
 
 struct RealFileSystem: FileSystemOps {
@@ -20,18 +21,30 @@ struct RealFileSystem: FileSystemOps {
     func trash(_ url: URL) throws { try FileManager.default.trashItem(at: url, resultingItemURL: nil) }
     func remove(_ url: URL) throws { try FileManager.default.removeItem(at: url) }
     func move(_ from: URL, to: URL) throws { try FileManager.default.moveItem(at: from, to: to) }
+    func copy(_ from: URL, to: URL) throws { try FileManager.default.copyItem(at: from, to: to) }
 }
 
 enum FileOperation: Sendable, Equatable {
     case trash
     case deletePermanently
     case move(destination: URL)
+    /// Copy into a folder; the source file and its row are left alone.
+    case copy(destination: URL)
+
+    /// The destination folder of a move or copy.
+    var destination: URL? {
+        switch self {
+        case .move(let d), .copy(let d): d
+        case .trash, .deletePermanently: nil
+        }
+    }
 
     var name: String {
         switch self {
         case .trash: "trash"
         case .deletePermanently: "delete"
         case .move: "move"
+        case .copy: "copy"
         }
     }
 }
@@ -60,7 +73,8 @@ enum FileOpError: Error, LocalizedError {
 }
 
 /// Trashes / deletes / moves samples on disk, then reconciles the index. Invoked from the
-/// duplicates view (trash / move redundant copies) and from the list's "Move to Folder…".
+/// duplicates view (trash / move redundant copies), the list's "Move to Folder…", and sample
+/// drops onto a folder (copy or move).
 actor FileOperator {
     private let database: AppDatabase
     private let fs: any FileSystemOps
@@ -96,17 +110,17 @@ actor FileOperator {
         defer { for url in rootURLs.values { url.stopAccessingSecurityScopedResource() } }
 
         var destScoped = false
-        if case .move(let dest) = op {
+        if let dest = op.destination {
             destScoped = dest.startAccessingSecurityScopedResource()
         }
-        defer { if destScoped, case .move(let dest) = op { dest.stopAccessingSecurityScopedResource() } }
+        defer { if destScoped, let dest = op.destination { dest.stopAccessingSecurityScopedResource() } }
 
         // Root paths `reconcile` uses to decide whether a moved file landed inside a known root
         // (→ re-path the row) or outside every root (→ mark missing). Start with the source roots,
         // then add the root that contains a move destination even if it held no source file — so
         // moving a sample from one indexed folder into another re-paths instead of orphaning it.
         var indexedRootPaths: [(Int64, String)] = rootURLs.map { ($0.key, $0.value.standardizedFileURL.path) }
-        if case .move(let dest) = op {
+        if let dest = op.destination {
             let destPath = dest.standardizedFileURL.path
             for (id, root) in rootsById where !indexedRootPaths.contains(where: { $0.0 == id }) {
                 guard root.isAvailable, let url = try? resolveRoot(root) else { continue }
@@ -133,6 +147,10 @@ actor FileOperator {
                 case .move(let dest):
                     let target = Self.uniqueDestination(in: dest, filename: sample.filename, exists: fs.exists)
                     try fs.move(url, to: target)
+                    result.destination = target
+                case .copy(let dest):
+                    let target = Self.uniqueDestination(in: dest, filename: sample.filename, exists: fs.exists)
+                    try fs.copy(url, to: target)
                     result.destination = target
                 }
                 result.succeeded = true
@@ -283,6 +301,10 @@ actor FileOperator {
                             // Moved outside every indexed root — the file is fine, just no longer ours.
                             try db.execute(sql: "UPDATE sample SET status = 'missing' WHERE id = ?", arguments: [s.id])
                         }
+                    case .copy:
+                        // The original stays put; the destination rescan indexes the copy, and its
+                        // content hash picks up the same rating/tags/notes.
+                        break
                     case .trash, .deletePermanently:
                         // The file left its folder; drop the row so it leaves the list. The
                         // hash-keyed annotation stays, so re-indexing the same audio (or a Finder

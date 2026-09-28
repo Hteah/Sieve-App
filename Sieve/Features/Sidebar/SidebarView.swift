@@ -1,6 +1,7 @@
 import AppKit
 import GRDB
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// Fetch full `SampleRow`s by id straight from the DB — used when a drag lands in a window whose
 /// filtered list doesn't contain the dragged rows (e.g. dropped from another window).
@@ -62,6 +63,8 @@ struct SidebarView: View {
         let id = UUID()
         let rows: [SampleRow]
         let destination: URL
+        /// From a drag-drop: the sheet asks Copy or Move.
+        var offerCopy = false
     }
 
     /// List rows currently selected that can actually be moved: present, on an available root.
@@ -83,7 +86,7 @@ struct SidebarView: View {
             let rows = await fetchSampleRows(ids, from: env.database)
                 .filter { $0.status == .present && !sameFolder($0) }
             guard !rows.isEmpty else { return }
-            moveHere = MoveHereRequest(rows: rows, destination: destination)
+            moveHere = MoveHereRequest(rows: rows, destination: destination, offerCopy: true)
         }
         return true
     }
@@ -250,7 +253,8 @@ struct SidebarView: View {
             Button(sheet.isRename ? "Rename" : "Create") { commitGroupSheet(sheet) }
         }
         .sheet(item: $moveHere) { req in
-            MoveToFolderSheet(model: model, rows: req.rows, destination: req.destination)
+            MoveToFolderSheet(model: model, rows: req.rows, destination: req.destination,
+                              offerCopy: req.offerCopy)
         }
     }
 
@@ -271,6 +275,7 @@ struct SidebarView: View {
                         .padding(.vertical, 1).padding(.horizontal, 3)
                         .background { dropHighlight(key) }
                         .background { folderDropCatcher(key: key, rootId: node.rootId, subpath: node.path) }
+                        .draggable(folderDrag(rootId: node.rootId, subpath: node.path, name: node.name))
                         .tag(LibraryScope.folder(rootId: node.rootId, parentDir: node.path))
                         .contextMenu {
                             Button("Move Selected Samples Here") {
@@ -299,6 +304,13 @@ struct SidebarView: View {
                 return acceptDrop(ids, into: dest) { $0.rootId == rootId && $0.parentDir == subpath }
             }
         )
+    }
+
+    /// Drag payload for a folder / drive row — dropped on Finder it copies the whole folder.
+    private func folderDrag(rootId: Int64, subpath: String, name: String) -> FolderDrag {
+        let root = env.rootURL(for: rootId)
+        return FolderDrag(url: subpath.isEmpty ? root : root?.appending(path: subpath),
+                          rootURL: root, name: name)
     }
 
     /// The tag / Quick Tag equivalent: drop the dragged rows onto a sidebar tag to apply it.
@@ -343,6 +355,7 @@ struct SidebarView: View {
         .padding(.vertical, 1).padding(.horizontal, 3)
         .background { dropHighlight(key) }
         .background { folderDropCatcher(key: key, rootId: id, subpath: "") }
+        .draggable(folderDrag(rootId: id, subpath: "", name: root.name))
         .contextMenu {
             Button("Rescan") { Task { await env.scanner.scan(rootId: id) } }
             Button("Reveal in Finder") {
@@ -569,5 +582,35 @@ struct SampleDropCatcher: NSViewRepresentable {
             if let s = pb.string(forType: .string), let one = Int64(s) { return [one] }
             return []
         }
+    }
+}
+
+/// Drag payload for a sidebar folder / drive row: the folder itself, as a file promise (Finder
+/// copies the whole tree) and as a plain file URL for apps that only read those. It carries no
+/// sample id, so Sieve's own `SampleDropCatcher`s ignore it.
+struct FolderDrag: Transferable {
+    let url: URL?
+    let rootURL: URL?
+    let name: String
+
+    static var transferRepresentation: some TransferRepresentation {
+        FileRepresentation(exportedContentType: .folder) { drag in
+            guard let url = drag.url, let rootURL = drag.rootURL else { throw CocoaError(.fileNoSuchFile) }
+            // Keep the root readable while the receiver copies — longer than a single sample's
+            // 20 s, since a whole folder can take a while.
+            if rootURL.startAccessingSecurityScopedResource() {
+                Task { @MainActor in
+                    try? await Task.sleep(for: .seconds(300))
+                    rootURL.stopAccessingSecurityScopedResource()
+                }
+            }
+            return SentTransferredFile(url)
+        }
+        .suggestedFileName { $0.name }
+
+        ProxyRepresentation(exporting: { drag -> URL in
+            guard let url = drag.url else { throw CocoaError(.fileNoSuchFile) }
+            return url
+        })
     }
 }

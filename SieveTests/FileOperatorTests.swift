@@ -22,6 +22,7 @@ final class FakeFS: FileSystemOps, @unchecked Sendable {
     }
     func remove(_ url: URL) throws { try FileManager.default.removeItem(at: url) }
     func move(_ from: URL, to: URL) throws { try FileManager.default.moveItem(at: from, to: to) }
+    func copy(_ from: URL, to: URL) throws { try FileManager.default.copyItem(at: from, to: to) }
 }
 
 struct FileOperatorTests {
@@ -135,6 +136,32 @@ struct FileOperatorTests {
         #expect(row["parentDir"] == "A")
         #expect(row["filename"] == "kick (2).wav")
         #expect(row["status"] == "present")
+    }
+
+    @Test func copyLeavesOriginalAndLogs() async throws {
+        let w = try await makeWorld()
+        let sample = try await groups(w.db)[0].members.first { $0.relativePath == "B/kick.wav" }!
+        let elsewhere = w.root.deletingLastPathComponent().appending(path: "Elsewhere")
+        let results = await w.op.perform(.copy(destination: elsewhere), on: [sample])
+        #expect(results[0].succeeded)
+        #expect(FileManager.default.fileExists(atPath: w.root.appending(path: "B/kick.wav").path))
+        #expect(FileManager.default.fileExists(atPath: elsewhere.appending(path: "kick.wav").path))
+        let row = try await w.db.reader.read { try Row.fetchOne($0, sql: "SELECT relativePath, status FROM sample WHERE id = ?", arguments: [sample.id]) }!
+        #expect(row["relativePath"] == "B/kick.wav")
+        #expect(row["status"] == "present")
+        let logs = try await w.db.reader.read { try FileOpLog.fetchAll($0) }
+        #expect(logs.contains { $0.op == "copy" && $0.succeeded && $0.destinationPath != nil })
+        #expect(logs.allSatisfy { !$0.isUndoableMove })
+    }
+
+    @Test func copyCollisionGetsSuffix() async throws {
+        let w = try await makeWorld()
+        let sample = try await groups(w.db)[0].members.first { $0.relativePath == "B/kick.wav" }!
+        let results = await w.op.perform(.copy(destination: w.root.appending(path: "A")), on: [sample])
+        #expect(results[0].succeeded)
+        #expect(results[0].destination?.lastPathComponent == "kick (2).wav")
+        #expect(FileManager.default.fileExists(atPath: w.root.appending(path: "A/kick.wav").path))
+        #expect(FileManager.default.fileExists(atPath: w.root.appending(path: "B/kick.wav").path))
     }
 
     @Test func undoMovePutsFileBackAndRepaths() async throws {

@@ -44,6 +44,8 @@ struct SampleListView: View {
         let id = UUID()
         let rows: [SampleRow]
         let destination: URL
+        /// From a drag-drop: the sheet asks Copy or Move.
+        var offerCopy = false
     }
 
     private struct DeleteRequest: Identifiable {
@@ -233,7 +235,11 @@ struct SampleListView: View {
                 guard env.player.currentSampleId != row.id else { return }
                 env.preview(row)
             }
-            .draggable(model.selection) // placeholder; per-row drag below
+            // Multi-item drag: each row cell is a `draggable(containerItemID:)`; dragging a row
+            // that's part of the selection carries the whole selection (one pasteboard item per
+            // sample), dragging an unselected row carries just that row — like Finder.
+            .dragContainer(for: SampleDrag.self) { ids in sampleDrags(for: ids) }
+            .dragContainerSelection(Array(model.selection))
             .overlay {
                 if model.rows.isEmpty { emptyState }
             }
@@ -256,7 +262,8 @@ struct SampleListView: View {
                 BatchConvertSheet(model: model, rows: req.rows)
             }
             .sheet(item: $moveRequest) { req in
-                MoveToFolderSheet(model: model, rows: req.rows, destination: req.destination)
+                MoveToFolderSheet(model: model, rows: req.rows, destination: req.destination,
+                                  offerCopy: req.offerCopy)
             }
             .themedSurface(palette)
     }
@@ -347,10 +354,18 @@ struct SampleListView: View {
         // `LibraryViewModel.loadMoreIfNeeded`. A large scope only ever loads a bounded page at a
         // time, so a sort/filter change never has to rebuild more than that many rows.
         .onAppear { model.loadMoreIfNeeded(near: row) }
-        .draggable(SampleDrag(id: row.id,
-                              fileURL: env.fileURL(for: row),
-                              rootURL: env.rootURL(for: row.rootId),
-                              filename: row.filename))
+        .draggable(containerItemID: row.id)
+    }
+
+    /// Drag payloads for the dragged row ids, in list order.
+    private func sampleDrags(for ids: [Int64]) -> [SampleDrag] {
+        let wanted = Set(ids)
+        return model.rows.filter { wanted.contains($0.id) }.map { row in
+            SampleDrag(id: row.id,
+                       fileURL: env.fileURL(for: row),
+                       rootURL: env.rootURL(for: row.rootId),
+                       filename: row.filename)
+        }
     }
 
     /// Manual plain/⌘/shift click-to-select, standing in for Table's native multi-select — see
@@ -518,14 +533,14 @@ struct SampleListView: View {
         }
     }
 
-    /// Samples were dropped on the list — move them into the folder this window is scoped to.
+    /// Samples were dropped on the list — copy or move them into the folder this window is scoped to.
     private func handleListDrop(_ ids: [Int64]) -> Bool {
         guard let (dest, here) = dropScopeFolder, !ids.isEmpty else { return false }
         Task { @MainActor in
             let rows = await fetchSampleRows(ids, from: env.database)
                 .filter { $0.status == .present && !here($0) }
             guard !rows.isEmpty else { return }
-            moveRequest = MoveRequest(rows: rows, destination: dest)
+            moveRequest = MoveRequest(rows: rows, destination: dest, offerCopy: true)
         }
         return true
     }
@@ -545,18 +560,6 @@ struct SampleListView: View {
     }
 }
 
-extension Set<Int64>: @retroactive Transferable {
-    public static var transferRepresentation: some TransferRepresentation {
-        CodableRepresentation(contentType: .data)
-    }
-}
-
-extension Int64: @retroactive Transferable {
-    public static var transferRepresentation: some TransferRepresentation {
-        CodableRepresentation(contentType: .data)
-    }
-}
-
 /// Drag payload for a sample row: exports the real audio file (for Finder / other apps), the
 /// sample id **as plain text** so the sidebar's AppKit drop catchers can read it off the
 /// pasteboard (SwiftUI's own `.dropDestination` on `List` rows loses the payload), and the same
@@ -571,7 +574,7 @@ extension Int64: @retroactive Transferable {
 /// The ProxyRepresentation below exports the same URL through URL's own Transferable
 /// conformance, which puts a genuine file-url pasteboard item rather than a promise, so those
 /// apps have something to read directly.
-struct SampleDrag: Transferable {
+struct SampleDrag: Transferable, Identifiable {
     let id: Int64
     let fileURL: URL?
     let rootURL: URL?
@@ -627,14 +630,7 @@ struct WaveformCell: View {
         }
         .frame(height: 36)
         .frame(maxWidth: .infinity)
-        .draggable(sampleDrag)
-    }
-
-    private var sampleDrag: SampleDrag {
-        SampleDrag(id: row.id,
-                   fileURL: env.fileURL(for: row),
-                   rootURL: env.rootURL(for: row.rootId),
-                   filename: row.filename)
+        .draggable(containerItemID: row.id)   // payload comes from the Table's dragContainer
     }
 }
 
@@ -713,18 +709,25 @@ struct FilterBar: View {
 /// Confirms and runs a "Move to Folder…" on the list selection, through the same audited
 /// `FileOperator` the duplicates view uses: it re-checks each file, moves it, logs the op, and
 /// re-paths the sample row if the destination is inside an indexed folder (so ratings/tags/notes
-/// follow). Files that are missing or on an unmounted volume are skipped.
+/// follow). Files that are missing or on an unmounted volume are skipped. Opened from a drag-drop
+/// (`offerCopy`), it asks Copy or Move each time — copy is the default, since it can't lose anything.
 struct MoveToFolderSheet: View {
     @Environment(AppEnvironment.self) private var env
     @Environment(\.dismiss) private var dismiss
     @Bindable var model: LibraryViewModel
     let rows: [SampleRow]
     let destination: URL
+    var offerCopy = false
 
     @State private var phase: Phase = .confirm
     @State private var results: [FileOpResult] = []
+    @State private var copying = true
 
     enum Phase { case confirm, working, done }
+
+    /// Copy only when the choice was offered; the menu's "Move to Folder…" always moves.
+    private var isCopy: Bool { offerCopy && copying }
+    private var verb: String { isCopy ? "Copy" : "Move" }
 
     private var eligible: [SampleRow] {
         rows.filter { $0.status == .present && (model.root(for: $0.rootId)?.isAvailable ?? false) }
@@ -734,7 +737,7 @@ struct MoveToFolderSheet: View {
         VStack(alignment: .leading, spacing: 14) {
             switch phase {
             case .confirm: confirmView
-            case .working: ProgressView("Moving…").frame(maxWidth: .infinity, minHeight: 80)
+            case .working: ProgressView(isCopy ? "Copying…" : "Moving…").frame(maxWidth: .infinity, minHeight: 80)
             case .done: doneView
             }
         }
@@ -744,7 +747,14 @@ struct MoveToFolderSheet: View {
 
     private var confirmView: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Move \(eligible.count) file\(eligible.count == 1 ? "" : "s")").font(.headline)
+            if offerCopy {
+                Picker("", selection: $copying) {
+                    Text("Copy").tag(true)
+                    Text("Move").tag(false)
+                }
+                .pickerStyle(.segmented).labelsHidden().fixedSize()
+            }
+            Text("\(verb) \(eligible.count) file\(eligible.count == 1 ? "" : "s")").font(.headline)
             Text("to \u{201C}\(destination.lastPathComponent)\u{201D}")
                 .font(.callout).foregroundStyle(.secondary)
                 .lineLimit(1).truncationMode(.middle)
@@ -757,12 +767,14 @@ struct MoveToFolderSheet: View {
                 }
             }
             .frame(minHeight: 140, maxHeight: 300)
-            Text("Files are moved on disk. Ratings, tags and notes follow. A name clash gets a \u{201C} (2)\u{201D} suffix.")
+            Text(isCopy
+                 ? "Files are copied; the originals stay where they are. Copies inside an indexed folder share the originals\u{2019} ratings, tags and notes. A name clash gets a \u{201C} (2)\u{201D} suffix."
+                 : "Files are moved on disk. Ratings, tags and notes follow. A name clash gets a \u{201C} (2)\u{201D} suffix.")
                 .font(.caption).foregroundStyle(.secondary)
             HStack {
                 Spacer()
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
-                Button("Move") { run() }.keyboardShortcut(.defaultAction).disabled(eligible.isEmpty)
+                Button(verb) { run() }.keyboardShortcut(.defaultAction).disabled(eligible.isEmpty)
             }
         }
     }
@@ -771,8 +783,8 @@ struct MoveToFolderSheet: View {
         let failed = results.filter { !$0.succeeded }
         return VStack(alignment: .leading, spacing: 12) {
             Text(failed.isEmpty
-                 ? "Moved \(results.count) file\(results.count == 1 ? "" : "s")"
-                 : "\(results.count - failed.count) moved, \(failed.count) failed")
+                 ? "\(isCopy ? "Copied" : "Moved") \(results.count) file\(results.count == 1 ? "" : "s")"
+                 : "\(results.count - failed.count) \(isCopy ? "copied" : "moved"), \(failed.count) failed")
                 .font(.headline)
             if !failed.isEmpty {
                 List(failed) { f in
@@ -790,12 +802,14 @@ struct MoveToFolderSheet: View {
     private func run() {
         phase = .working
         let targets = eligible
+        let copy = isCopy
         Task {
             let op = FileOperator(database: env.database, bookmarks: env.bookmarks)
-            results = await op.perform(.move(destination: destination), on: targets)
+            results = await op.perform(copy ? .copy(destination: destination) : .move(destination: destination),
+                                       on: targets)
             phase = .done
             // Rescan the folders we moved out of, plus the destination folder if it's indexed.
-            var roots = Set(targets.map(\.rootId))
+            var roots = copy ? Set<Int64>() : Set(targets.map(\.rootId))
             if let destRoot = env.rootId(containing: destination) { roots.insert(destRoot) }
             for id in roots { await env.scanner.scan(rootId: id) }
         }

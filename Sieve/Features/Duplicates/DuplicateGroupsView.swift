@@ -190,6 +190,7 @@ struct DuplicateGroupsView: View {
         case .trash: verb = "Move to Trash"
         case .deletePermanently: verb = "Delete Permanently"
         case .move(let d): verb = "Move to \"\(d.lastPathComponent)\""
+        case .copy(let d): verb = "Copy to \"\(d.lastPathComponent)\""
         }
         return VStack(alignment: .leading, spacing: 12) {
             Text("\(verb): \(p.samples.count) file\(p.samples.count == 1 ? "" : "s") (\(Fmt.bytes(total)))").font(.headline)
