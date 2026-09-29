@@ -10,6 +10,9 @@ struct ContentView: View {
     @State private var showInspector = UserDefaults.standard.object(forKey: "showInspector") as? Bool ?? true
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @State private var followTask: Task<Void, Never>?
+    /// Set when the list selection moves off a file with unsaved editor changes — asks whether
+    /// to discard them and open the new file, or keep editing.
+    @State private var pendingEditorRow: SampleRow?
     @State private var controlHint = ControlHint()
     @AppStorage("showControlInfo") private var showControlInfo = false
     @AppStorage("browsePreview") private var browsePreview = false
@@ -47,11 +50,12 @@ struct ContentView: View {
                     .onChange(of: model.primarySelection?.id) { _, _ in
                         followTask?.cancel()
                         env.editor.noteListSelection(model.primarySelection)
-                        // Follow the list selection only when the editor has nothing unsaved —
-                        // a dirty editor keeps its file so browsing the list isn't blocked.
-                        guard env.editor.isActive, !env.editor.isDirty,
+                        guard env.editor.isActive,
                               let row = model.primarySelection,
                               row.id != env.editor.source?.sampleId else { return }
+                        // Unsaved edits: don't silently keep the old file (it looked stuck) or
+                        // silently drop the edits — ask.
+                        if env.editor.isDirty { pendingEditorRow = row; return }
                         followTask = Task {
                             // Debounce for inline browsing; load immediately when the pop-out window is open.
                             if !env.editor.windowOpen {
@@ -69,6 +73,20 @@ struct ContentView: View {
         .onAppear { if model == nil { model = LibraryViewModel(database: env.database) } }
         .onChange(of: showInspector) { _, shown in
             UserDefaults.standard.set(shown, forKey: "showInspector")
+        }
+        .alert("Discard unsaved edits?", isPresented: Binding(
+            get: { pendingEditorRow != nil }, set: { if !$0 { pendingEditorRow = nil } })) {
+            Button("Discard Changes", role: .destructive) {
+                // Open whatever is selected now (it may have moved on while the alert was up).
+                let row = model?.primarySelection ?? pendingEditorRow
+                pendingEditorRow = nil
+                env.editor.discard()
+                if let row { Task { await env.editor.open(row: row) } }
+            }
+            .keyboardShortcut(.defaultAction)
+            Button("Keep Editing", role: .cancel) { pendingEditorRow = nil }
+        } message: {
+            Text("\u{201C}\(env.editor.source?.url.lastPathComponent ?? "This file")\u{201D} has changes in the editor that haven\u{2019}t been saved. Discard them and open \u{201C}\(pendingEditorRow?.filename ?? "the next file")\u{201D}?")
         }
         .alert("Something went wrong", isPresented: Binding(get: { env.lastError != nil }, set: { if !$0 { env.lastError = nil } })) {
             Button("OK") { env.lastError = nil }

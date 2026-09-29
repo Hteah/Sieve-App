@@ -220,6 +220,12 @@ final class EditorSession {
 
     func revert() async {
         guard let src = source else { return }
+        // The list has moved on to another file (the user kept editing past the discard prompt):
+        // reverting means "drop my edits", so go straight to that file instead of reloading this one.
+        if isActive, let row = lastListRow, row.id != src.sampleId {
+            await open(row: row)
+            return
+        }
         undo.removeAll(); redo.removeAll(); undoBytes = 0
         editSerial += 1; savedSerial = editSerial
         selection = nil
