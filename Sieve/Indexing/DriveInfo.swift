@@ -12,8 +12,15 @@ enum DriveInfo {
         guard path.hasPrefix(volumesPrefix) else { return nil }
         let rest = path.dropFirst(volumesPrefix.count)
         let name = rest.split(separator: "/", maxSplits: 1, omittingEmptySubsequences: false).first.map(String.init) ?? ""
-        return name.isEmpty ? nil : name
+        // /Volumes also holds a link to the startup disk ("Macintosh HD") and Time Machine's
+        // local snapshots -- neither is an external drive.
+        guard !name.isEmpty, name != bootVolumeName, !name.hasPrefix("com.apple.") else { return nil }
+        return name
     }
+
+    /// The startup disk's name (read once), so "/Volumes/Macintosh HD/…" isn't taken for a drive.
+    static let bootVolumeName: String? =
+        try? URL(fileURLWithPath: "/").resourceValues(forKeys: [.volumeNameKey]).volumeName
 
     /// The mount point of a drive: /Volumes/<name>.
     static func volumeURL(forDrive name: String) -> URL {

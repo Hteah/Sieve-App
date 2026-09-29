@@ -12,6 +12,11 @@ struct ExternalDrivesTests {
         #expect(DriveInfo.externalDriveName(forPath: "/Volumes") == nil)
         #expect(DriveInfo.externalDriveName(forPath: "/Volumes/") == nil)
         #expect(DriveInfo.volumeURL(forDrive: "SAMPLES SSD").path == "/Volumes/SAMPLES SSD")
+        // Not drives: the startup disk's /Volumes link and Time Machine's local snapshots.
+        if let boot = DriveInfo.bootVolumeName {
+            #expect(DriveInfo.externalDriveName(forPath: "/Volumes/\(boot)/Users/h") == nil)
+        }
+        #expect(DriveInfo.externalDriveName(forPath: "/Volumes/com.apple.TimeMachine.localsnapshots/x") == nil)
     }
 
     /// Roots on /Volumes/A (at its top and in a sub-folder), one on /Volumes/AB (must not match "A"
