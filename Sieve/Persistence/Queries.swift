@@ -126,6 +126,8 @@ enum LibraryScope: Hashable, Sendable {
     case root(Int64)
     case folder(rootId: Int64, parentDir: String)
     case group(Int64)
+    /// Every root on one external drive (`DriveInfo`), grouped or not.
+    case drive(String)
     case tag(Int64)
     case quickTag(Int)     // Quick Tag slot index 0..<QuickTags.count
 }
@@ -209,6 +211,12 @@ enum Queries {
             wheres.append("rootId = \(rootId) AND (parentDir = \(parentDir) OR parentDir LIKE \(parentDir + "/%"))")
         case .group(let groupId):
             wheres.append("status != 'unavailable' AND rootId IN (SELECT id FROM root WHERE groupId = \(groupId))")
+        case .drive(let name):
+            let mount = DriveInfo.volumesPrefix + name
+            wheres.append("""
+                status != 'unavailable' AND rootId IN (SELECT id FROM root
+                    WHERE lastResolvedPath = \(mount) OR lastResolvedPath LIKE \(mount + "/%"))
+                """)
         case .tag(let tagId):
             wheres.append("annotationId IN (SELECT annotationId FROM annotation_tag WHERE tagId = \(tagId))")
         case .quickTag(let index):

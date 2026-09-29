@@ -206,6 +206,11 @@ final class LibraryViewModel {
                        !data.groups.contains(where: { $0.id == gid }) {
                         self.filter.scope = .all
                     }
+                    // ...or at a drive none of the roots are on any more.
+                    if case .drive(let name) = self.filter.scope,
+                       !data.roots.contains(where: { $0.externalDriveName == name }) {
+                        self.filter.scope = .all
+                    }
                 }
             } catch {
                 Self.log.error("sidebar observation failed: \(error, privacy: .public)")

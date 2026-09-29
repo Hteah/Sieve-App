@@ -34,6 +34,12 @@ struct SidebarView: View {
     /// override, is both simpler and what "closed except for the one I left open" actually
     /// means.
     @AppStorage("collapsedFolderGroups") private var collapsedGroupsJSON = ""
+    /// Same plain persistence for the External Drives section's drive headings (by drive name).
+    @AppStorage("collapsedExternalDrives") private var collapsedDrivesJSON = ""
+    private var collapsedDrives: Set<String> {
+        get { Set((try? JSONDecoder().decode([String].self, from: Data(collapsedDrivesJSON.utf8))) ?? []) }
+        nonmutating set { collapsedDrivesJSON = (try? String(data: JSONEncoder().encode(Array(newValue)), encoding: .utf8)) ?? "" }
+    }
     private var collapsedGroups: Set<Int64> {
         get { Set((try? JSONDecoder().decode([Int64].self, from: Data(collapsedGroupsJSON.utf8))) ?? []) }
         // nonmutating: collapsedGroupsJSON (an @AppStorage) is itself already fine to write from
@@ -143,6 +149,18 @@ struct SidebarView: View {
                     Label("New Group…", systemImage: "folder.badge.plus")
                 }
                 .buttonStyle(.plain).foregroundStyle(.secondary)
+            }
+
+            if !externalDrives.isEmpty {
+                Section("External Drives") {
+                    ForEach(externalDrives, id: \.name) { drive in
+                        DisclosureGroup(isExpanded: expansion(forDrive: drive.name)) {
+                            ForEach(drive.roots) { root in rootRow(root) }
+                        } label: {
+                            driveLabel(drive.name, roots: drive.roots).tag(LibraryScope.drive(drive.name))
+                        }
+                    }
+                }
             }
 
             Section("Tags") {
@@ -404,7 +422,7 @@ struct SidebarView: View {
         HStack(spacing: 6) {
             Circle().fill(root.isAvailable ? Color.green : Color.orange).frame(width: 7, height: 7)
                 .help(root.isAvailable ? "Available" : "Volume not mounted")
-            Label(root.name, systemImage: "externaldrive")
+            Label(root.name, systemImage: root.externalDriveName == nil ? "folder" : "externaldrive")
             Spacer()
             locationMarker(rootId: id, path: "")
             if env.scanState.activeRoots[id] != nil {
@@ -543,8 +561,58 @@ struct SidebarView: View {
         model.roots.filter { $0.groupId == groupId }
     }
 
+    /// Ungrouped folders on the Mac. Ungrouped folders on external drives go under their drive in
+    /// the External Drives section instead; grouped folders stay in their group wherever they live.
     private var ungroupedRoots: [Root] {
-        model.roots.filter { $0.groupId == nil }
+        model.roots.filter { $0.groupId == nil && $0.externalDriveName == nil }
+    }
+
+    /// Ungrouped external folders, by drive (sorted by drive name).
+    private var externalDrives: [(name: String, roots: [Root])] {
+        var byDrive: [String: [Root]] = [:]
+        for root in model.roots where root.groupId == nil {
+            if let drive = root.externalDriveName { byDrive[drive, default: []].append(root) }
+        }
+        return byDrive.keys.sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+            .map { (name: $0, roots: byDrive[$0] ?? []) }
+    }
+
+    private func expansion(forDrive name: String) -> Binding<Bool> {
+        Binding(get: { !collapsedDrives.contains(name) },
+                set: { open in
+                    if open { collapsedDrives.remove(name) } else { collapsedDrives.insert(name) }
+                })
+    }
+
+    /// A drive heading: connected dot, name (+ "offline"), total samples, and Eject while connected.
+    private func driveLabel(_ name: String, roots: [Root]) -> some View {
+        let connected = roots.contains(where: \.isAvailable)
+        let count = roots.reduce(0) { $0 + $1.fileCount }
+        return HStack(spacing: 6) {
+            Circle().fill(connected ? Color.green : Color.orange).frame(width: 7, height: 7)
+                .help(connected ? "Connected" : "Not connected")
+            Label(name, systemImage: "externaldrive.fill")
+            if !connected { Text("offline").font(.caption).foregroundStyle(.secondary) }
+            Spacer()
+            Text("\(count)").font(.caption).foregroundStyle(.secondary)
+            if connected {
+                Button { Task { await env.ejectDrive(named: name) } } label: {
+                    Image(systemName: "eject.fill").font(.caption)
+                }
+                .buttonStyle(.plain).foregroundStyle(.secondary)
+                .help("Eject \u{201C}\(name)\u{201D}")
+            }
+        }
+        .contextMenu {
+            Button("Rescan Drive") {
+                Task { for root in roots { if let id = root.id { await env.scanner.scan(rootId: id) } } }
+            }
+            Button("Reveal in Finder") { NSWorkspace.shared.activateFileViewerSelecting([DriveInfo.volumeURL(forDrive: name)]) }
+                .disabled(!connected)
+            Divider()
+            Button("Eject") { Task { await env.ejectDrive(named: name) } }
+                .disabled(!connected)
+        }
     }
 
     private func expansion(for groupId: Int64) -> Binding<Bool> {

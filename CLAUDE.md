@@ -9,7 +9,7 @@ sample folders, shows amplitude-accurate waveforms, lets the user tag/rate/quick
 audio, and find exact duplicates. Indexing never touches files on disk; every write is an explicit user action
 (see **Code paths that modify files** below).
 
-Main window: sidebar (Library scopes, folder groups → roots → sub-folder tree, Tags, Quick Tags) · sample
+Main window: sidebar (Library scopes, folder groups → roots → sub-folder tree, External Drives → roots, Tags, Quick Tags) · sample
 `Table` with a filter bar and a status bar ("N samples", "· N selected") · `.inspector` (info + Edit tab).
 Other windows (`App/SieveApp.swift`): pop-out Audio Editor, Move History, Theme, Quick Tags.
 
@@ -85,7 +85,7 @@ so ratings/tags/notes survive moves/renames and are shared by identical copies (
 is the single lookup/create point). Path-keyed fallback exists only for undecodable files.
 
 **Library query (`Persistence/Queries.swift`):** `LibraryScope` (all, favorites, missing, duplicates,
-`folderDuplicates(rootId:parentDir:)`, root, folder, group, tag, quickTag) + `SampleFilter` → SQL. The table is
+`folderDuplicates(rootId:parentDir:)`, root, folder, group, drive, tag, quickTag) + `SampleFilter` → SQL. The table is
 **paginated** (`LibraryViewModel.pageSize` 500, grows on scroll; `totalCount` is the real scope size) — never
 hand SwiftUI's `Table` a whole 15k-row scope, and every sort change re-queries SQL. `SampleSort` holds both the
 SQL order and the in-memory `rowsAreInOrder`; a sortable column needs a distinct `SampleRow.*SortKey` key path
@@ -128,6 +128,12 @@ with unsaved edits it asks "Discard unsaved edits?" instead of switching. The Re
 **Sandbox rules:** all file access to a root goes through its bookmark; hold the scope on the *root* URL
 (`withSecurityScope` in `BookmarkStore.swift`) — child URLs only inherit while the root's scope is active.
 `AppEnvironment.rootURL(for:)` caches resolved root URLs.
+
+**External drives:** `Indexing/DriveInfo` decides "external" from a root's `lastResolvedPath` alone (under
+`/Volumes/<name>/`), so it works while the drive is unplugged — no stored column. Ungrouped external roots show
+under their drive in the sidebar's External Drives section (grouped ones stay in their group); `.drive(name)` is
+every root on that drive. Eject (`AppEnvironment.ejectDrive(named:)`) stops playback from the drive, refuses
+while the editor holds unsaved edits to a file on it, then `unmountAndEjectDevice`; `VolumeMonitor` does the rest.
 
 **Themes / Quick Tags:** `App/SharedTheme` reads/writes the theme format shared with R3WRK in
 `~/Library/Application Support/Shared Themes/` (entitlement in `project.yml`); views use `@Environment(\.palette)`.
