@@ -135,7 +135,7 @@ struct SampleListView: View {
                     }
                 }
                 .width(76).customizationID("rating")
-                TableColumn("Quick Tag") { row in
+                TableColumn("Quick Tag", value: \.quickTagSortKey) { row in
                     let slots = QuickTags.load(quickTagSlotsJSON)
                     // The indicator is drawn as plain cell content: AppKit renders a menu's
                     // label, and it drops the custom-drawn oscillator glyphs (text/SF Symbols
@@ -293,6 +293,7 @@ struct SampleListView: View {
                 case .size: KeyPathComparator(\.fileSize, order: order)
                 case .created: KeyPathComparator(\.createdAt, order: order)
                 case .rating: KeyPathComparator(\.ratingSortKey, order: order)
+                case .quickTag: KeyPathComparator(\.quickTagSortKey, order: order)
                 case .rate: KeyPathComparator(\.rateSortKey, order: order)
                 case .bits: KeyPathComparator(\.bitsSortKey, order: order)
                 case .format: KeyPathComparator(\.ext, order: order)
@@ -307,6 +308,7 @@ struct SampleListView: View {
                 else if kp == \SampleRow.rateSortKey { field = .rate }
                 else if kp == \SampleRow.bitsSortKey { field = .bits }
                 else if kp == \SampleRow.ratingSortKey { field = .rating }
+                else if kp == \SampleRow.quickTagSortKey { field = .quickTag }
                 else if kp == \SampleRow.fileSize { field = .size }
                 else if kp == \SampleRow.createdAt { field = .created }
                 else if kp == \SampleRow.ext { field = .format }

@@ -46,6 +46,16 @@ struct SampleSortTests {
         #expect(desc.map(\.id) == [5, 6])
     }
 
+    @Test func quickTagSortPutsTaggedFirstInSlotOrder() {
+        func tagged(_ id: Int64, _ mask: Int?) -> SampleRow {
+            var r = row(id, name: "\(id)", rate: nil, bits: nil); r.quickTags = mask; return r
+        }
+        let rows = [tagged(1, nil), tagged(2, 0b100), tagged(3, 0b1), tagged(4, 0b10), tagged(5, 0b11)]
+        let desc = rows.sorted { SampleSort.quickTag.rowsAreInOrder($0, $1, ascending: false) }
+        #expect(desc.map(\.id) == [5, 3, 4, 2, 1])
+        #expect(!SampleSort.quickTag.defaultAscending)
+    }
+
     @Test func selectSnapsDirectionToFieldDefault() {
         var filter = SampleFilter()
         #expect(filter.sort == .name && filter.sortAscending)

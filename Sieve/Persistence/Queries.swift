@@ -2,7 +2,7 @@ import Foundation
 import GRDB
 
 enum SampleSort: String, CaseIterable, Sendable, Identifiable {
-    case name, path, duration, size, modified, created, rating, rate, bits, format
+    case name, path, duration, size, modified, created, rating, quickTag, rate, bits, format
     var id: String { rawValue }
     var label: String {
         switch self {
@@ -13,6 +13,7 @@ enum SampleSort: String, CaseIterable, Sendable, Identifiable {
         case .modified: "Modified"
         case .created: "Date Created"
         case .rating: "Rating"
+        case .quickTag: "Quick Tag"
         case .rate: "Sample rate"
         case .bits: "Bit depth"
         case .format: "Format"
@@ -29,6 +30,12 @@ enum SampleSort: String, CaseIterable, Sendable, Identifiable {
         case .modified: "modifiedAt"
         case .created: "createdAt"
         case .rating: "COALESCE(rating, 0)"
+        // Bit-reversed 6-bit mask (see `SampleRow.quickTagSortKey`).
+        case .quickTag: """
+            (((COALESCE(quickTags, 0) & 1) << 5) | ((COALESCE(quickTags, 0) & 2) << 3) \
+            | ((COALESCE(quickTags, 0) & 4) << 1) | ((COALESCE(quickTags, 0) & 8) >> 1) \
+            | ((COALESCE(quickTags, 0) & 16) >> 3) | ((COALESCE(quickTags, 0) & 32) >> 5))
+            """
         case .rate: "sampleRate"
         case .bits: "bitDepth"
         case .format: "ext COLLATE NOCASE"
@@ -38,7 +45,7 @@ enum SampleSort: String, CaseIterable, Sendable, Identifiable {
     /// Sorts whose column can be NULL — those rows sort last regardless of direction.
     private var nullable: Bool {
         switch self {
-        case .name, .path, .rating, .format, .created: false
+        case .name, .path, .rating, .quickTag, .format, .created: false
         case .duration, .size, .modified, .rate, .bits: true
         }
     }
@@ -47,7 +54,7 @@ enum SampleSort: String, CaseIterable, Sendable, Identifiable {
     var defaultAscending: Bool {
         switch self {
         case .name, .path, .rate, .bits, .format: true
-        case .duration, .size, .modified, .created, .rating: false   // duration: longest first
+        case .duration, .size, .modified, .created, .rating, .quickTag: false   // duration: longest first
         }
     }
 
@@ -85,6 +92,9 @@ enum SampleSort: String, CaseIterable, Sendable, Identifiable {
         case .rating:
             let ra = a.rating ?? 0, rb = b.rating ?? 0
             return ra == rb ? a.id < b.id : ascending == (ra < rb)
+        case .quickTag:
+            let qa = a.quickTagSortKey, qb = b.quickTagSortKey
+            return qa == qb ? a.id < b.id : ascending == (qa < qb)
         case .rate:
             return Self.orderOptional(a.sampleRate, b.sampleRate, ascending: ascending, aId: a.id, bId: b.id)
         case .bits:

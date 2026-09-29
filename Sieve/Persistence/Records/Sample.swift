@@ -110,6 +110,14 @@ struct SampleRow: Codable, Identifiable, Hashable, Sendable, FetchableRecord {
     var rateSortKey: Double { sampleRate ?? 0 }
     var bitsSortKey: Int { bitDepth ?? 0 }
     var ratingSortKey: Int { rating ?? 0 }
+    /// The quick-tag mask with its 6 bits reversed, so a descending sort puts slot-1 samples
+    /// first, then slot 2, … (matching the indicator's left-to-right order), untagged last.
+    var quickTagSortKey: Int {
+        let m = quickTags ?? 0
+        var r = 0
+        for i in 0..<QuickTags.count where m & (1 << i) != 0 { r |= 1 << (QuickTags.count - 1 - i) }
+        return r
+    }
 
     // Equality/hashing skip the multi-KB `waveform` blob (compare its size instead) and the
     // 64-char hash strings. SwiftUI's Table calls `==` per row while diffing a re-sorted list,
