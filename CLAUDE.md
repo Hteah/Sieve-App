@@ -134,6 +134,8 @@ with unsaved edits it asks "Discard unsaved edits?" instead of switching. The Re
 under their drive in the sidebar's External Drives section (grouped ones stay in their group); `.drive(name)` is
 every root on that drive. Eject (`AppEnvironment.ejectDrive(named:)`) stops playback from the drive, refuses
 while the editor holds unsaved edits to a file on it, then `unmountAndEjectDevice`; `VolumeMonitor` does the rest.
+Not drives: the startup disk's own `/Volumes/<boot name>` link and `com.apple.*` volumes (Time Machine
+snapshots etc.). Eject from inside the sandbox is untested on real hardware as of 2026-09-29.
 
 **Themes / Quick Tags:** `App/SharedTheme` reads/writes the theme format shared with R3WRK in
 `~/Library/Application Support/Shared Themes/` (entitlement in `project.yml`); views use `@Environment(\.palette)`.
