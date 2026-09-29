@@ -121,6 +121,8 @@ enum LibraryScope: Hashable, Sendable {
     case favorites
     case missing
     case duplicates
+    /// Duplicates involving one folder (and its sub-folders); `parentDir` "" = the whole root.
+    case folderDuplicates(rootId: Int64, parentDir: String)
     case root(Int64)
     case folder(rootId: Int64, parentDir: String)
     case group(Int64)
@@ -198,6 +200,9 @@ enum Queries {
                     WHERE status = 'present' AND COALESCE(audioHash, fileHash) IS NOT NULL
                     GROUP BY COALESCE(audioHash, fileHash) HAVING COUNT(*) > 1)
                 """)
+        case .folderDuplicates(let rootId, let parentDir):
+            // Only the duplicates view reads this scope; for the list it's just the folder.
+            wheres.append(folderPredicate(rootId: rootId, parentDir: parentDir))
         case .root(let rootId):
             wheres.append("rootId = \(rootId)")
         case .folder(let rootId, let parentDir):
@@ -224,6 +229,13 @@ enum Queries {
         }
 
         return (wheres, joins)
+    }
+
+    /// Rows inside one folder of a root, sub-folders included (`parentDir` "" = the whole root).
+    static func folderPredicate(rootId: Int64, parentDir: String) -> SQL {
+        parentDir.isEmpty
+            ? "rootId = \(rootId)"
+            : "rootId = \(rootId) AND (parentDir = \(parentDir) OR parentDir LIKE \(parentDir + "/%"))"
     }
 
     /// Turn free text into a prefix-matching FTS5 query: each token becomes `"tok"*`.

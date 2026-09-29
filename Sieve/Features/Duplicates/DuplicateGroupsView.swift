@@ -13,12 +13,26 @@ struct DuplicateGroupsView: View {
     @State private var results: [FileOpResult]?
     @State private var lastOp: FileOperation?
     @State private var isWorking = false
+    /// Folder mode only: also list the folder's files whose copy lives elsewhere in the library.
+    @AppStorage("folderDuplicatesIncludeElsewhere") private var includeElsewhere = false
     @Environment(\.openWindow) private var openWindow
 
     struct PendingOp: Identifiable {
         let id = UUID()
         var op: FileOperation
         var samples: [SampleRow]
+    }
+
+    /// Set when opened from a folder's "Find Duplicates" — limits the search to that folder.
+    private var folderScope: DuplicateFinder.Scope? {
+        guard case .folderDuplicates(let rootId, let parentDir) = model.filter.scope else { return nil }
+        return .init(rootId: rootId, parentDir: parentDir, includeElsewhere: includeElsewhere)
+    }
+
+    private var folderName: String? {
+        guard let s = folderScope else { return nil }
+        let rootName = model.root(for: s.rootId)?.name ?? "Folder"
+        return s.parentDir.isEmpty ? rootName : "\(rootName)/\(s.parentDir)"
     }
 
     private var totalWasted: Int64 { groups.reduce(0) { $0 + $1.wastedBytes } }
@@ -29,7 +43,11 @@ struct DuplicateGroupsView: View {
             Divider()
             if groups.isEmpty {
                 ContentUnavailableView("No Duplicates", systemImage: "doc.on.doc",
-                                       description: Text("No two indexed files share identical audio."))
+                                       description: Text(folderScope == nil
+                                           ? "No two indexed files share identical audio."
+                                           : includeElsewhere
+                                               ? "No file in this folder shares identical audio with another indexed file."
+                                               : "No two files in this folder share identical audio."))
             } else {
                 List {
                     ForEach(groups) { group in
@@ -46,7 +64,7 @@ struct DuplicateGroupsView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(palette.surface)
-        .task { await observe() }
+        .task(id: "\(model.filter.scope)-\(includeElsewhere)") { await observe() }
         .sheet(item: $pending) { p in confirmSheet(p) }
         .sheet(isPresented: Binding(get: { results != nil }, set: { if !$0 { results = nil } })) { resultsSheet }
         .overlay { if isWorking { ProgressView("Working…").padding().background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8)) } }
@@ -55,6 +73,10 @@ struct DuplicateGroupsView: View {
     private var header: some View {
         HStack {
             VStack(alignment: .leading) {
+                if let folderName {
+                    Text(folderName).font(.caption).foregroundStyle(.secondary)
+                        .lineLimit(1).truncationMode(.middle)
+                }
                 Text("\(groups.count) duplicate group\(groups.count == 1 ? "" : "s")").font(.headline)
                 if everyGroupHasKeeper || groups.isEmpty {
                     Text("\(Fmt.bytes(totalWasted)) in redundant copies").font(.caption).foregroundStyle(.secondary)
@@ -64,6 +86,12 @@ struct DuplicateGroupsView: View {
                 }
             }
             Spacer()
+            if folderScope != nil {
+                Toggle("Include copies elsewhere", isOn: $includeElsewhere)
+                    .controlSize(.small)
+                    .help("Also list files in this folder whose identical copy is in another folder")
+                Button("All Duplicates") { model.filter.scope = .duplicates }.controlSize(.small)
+            }
             Button("Move History…") { openWindow(id: "move-history") }.controlSize(.small)
             Menu("All Groups") {
                 Button("Trash All Redundant Copies…") { stage(.trash, samples: allRedundant()) }
@@ -257,7 +285,8 @@ struct DuplicateGroupsView: View {
     }
 
     private func observe() async {
-        let observation = ValueObservation.tracking { db in try DuplicateFinder.groups(db: db) }
+        let scope = folderScope
+        let observation = ValueObservation.tracking { db in try DuplicateFinder.groups(db: db, in: scope) }
         do {
             for try await g in observation.values(in: env.database.reader) { groups = g }
         } catch {

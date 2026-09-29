@@ -308,6 +308,9 @@ struct SidebarView: View {
                                 }
                             }
                             .disabled(movableSelection.isEmpty)
+                            Button("Find Duplicates") {
+                                model.filter.scope = .folderDuplicates(rootId: node.rootId, parentDir: node.path)
+                            }
                         }
                 }
             } label: {
@@ -419,6 +422,7 @@ struct SidebarView: View {
                 if let url = env.rootURL(for: id) { stageMoveHere(into: url) }
             }
             .disabled(movableSelection.isEmpty)
+            Button("Find Duplicates") { model.filter.scope = .folderDuplicates(rootId: id, parentDir: "") }
             Divider()
             groupMenu(for: id, root: root)
             Divider()

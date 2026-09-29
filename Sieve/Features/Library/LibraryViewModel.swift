@@ -21,7 +21,10 @@ final class LibraryViewModel {
             guard filter != oldValue else { return }
             // Kept as a separate observable flag so a sort/search/rating change to `filter`
             // doesn't invalidate ContentView (which only cares whether the duplicates view is up).
-            let dup = filter.scope == .duplicates
+            let dup: Bool = switch filter.scope {
+            case .duplicates, .folderDuplicates: true
+            default: false
+            }
             if showsDuplicates != dup { showsDuplicates = dup }
             // Sort changes used to just reorder the rows already in memory, but that meant a
             // library-wide scope handed its *entire* row set to the table to re-sort and
