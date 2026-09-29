@@ -12,6 +12,32 @@ protocol FileSystemOps: Sendable {
     func copy(_ from: URL, to: URL) throws
 }
 
+extension FileSystemOps {
+    /// Every file under `dir`, at any depth (not the directories themselves). Package bundles
+    /// count as one file. `.DS_Store` is left out — it's Finder litter, not the user's file.
+    func files(under dir: URL) throws -> [URL] {
+        guard let e = FileManager.default.enumerator(
+            at: dir, includingPropertiesForKeys: [.isDirectoryKey, .isPackageKey],
+            options: [.skipsPackageDescendants], errorHandler: { _, _ in true }) else { return [] }
+        var out: [URL] = []
+        for case let url as URL in e where url.lastPathComponent != ".DS_Store" {
+            let v = try? url.resourceValues(forKeys: [.isDirectoryKey, .isPackageKey])
+            if v?.isDirectory != true || v?.isPackage == true { out.append(url) }
+        }
+        return out
+    }
+
+    /// The folders directly inside `dir` (package bundles excluded).
+    func subfolders(of dir: URL) throws -> [URL] {
+        try FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.isDirectoryKey, .isPackageKey])
+            .filter {
+                let v = try? $0.resourceValues(forKeys: [.isDirectoryKey, .isPackageKey])
+                return v?.isDirectory == true && v?.isPackage != true
+            }
+            .sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
+    }
+}
+
 struct RealFileSystem: FileSystemOps {
     func exists(_ url: URL) -> Bool { FileManager.default.fileExists(atPath: url.path) }
     func attributes(_ url: URL) throws -> (size: Int64, modified: Date) {
@@ -256,6 +282,103 @@ actor FileOperator {
             Self.log.error("undo reconcile failed: \(error, privacy: .public)")
         }
         return result
+    }
+
+    // MARK: Flatten
+
+    struct FlattenPlan: Sendable {
+        var folderURL: URL
+        var subfolders: [String]    // names of the folders directly inside
+        var fileCount: Int          // files anywhere inside them (indexed or not)
+    }
+
+    struct FlattenResult: Sendable {
+        var sampleResults: [FileOpResult] = []   // indexed samples (logged, undoable moves)
+        var otherMoved = 0                       // un-indexed files (non-audio etc.)
+        var otherFailed: [String] = []           // "path: error"
+        var trashedFolders: [String] = []
+        var keptFolders: [String] = []           // still had files in them — left alone
+        var error: String?
+        var movedCount: Int { sampleResults.filter(\.succeeded).count + otherMoved }
+        var failedCount: Int { sampleResults.filter { !$0.succeeded }.count + otherFailed.count }
+    }
+
+    /// What "Flatten Folder" would do to `parentDir` ("" = the root itself), for the confirm sheet.
+    func flattenPlan(rootId: Int64, parentDir: String) async -> FlattenPlan? {
+        guard let rootURL = await availableRootURL(rootId) else { return nil }
+        let scoped = rootURL.startAccessingSecurityScopedResource()
+        defer { if scoped { rootURL.stopAccessingSecurityScopedResource() } }
+        let folder = parentDir.isEmpty ? rootURL : rootURL.appending(path: parentDir)
+        let subs = (try? fs.subfolders(of: folder)) ?? []
+        let count = subs.reduce(0) { $0 + ((try? fs.files(under: $1).count) ?? 0) }
+        return FlattenPlan(folderURL: folder, subfolders: subs.map(\.lastPathComponent), fileCount: count)
+    }
+
+    /// Moves every file from the sub-folders of `parentDir` (any depth) straight into it, then
+    /// moves each emptied sub-folder to the Trash. No file is deleted: indexed samples go through
+    /// `perform(.move…)` (logged in Move History, ratings/tags follow), everything else is moved
+    /// as-is, and a name clash gets a " (2)" suffix. A sub-folder that still holds a file (because
+    /// a move failed) is left in place.
+    func flatten(rootId: Int64, parentDir: String) async -> FlattenResult {
+        var result = FlattenResult()
+        guard let rootURL = await availableRootURL(rootId) else {
+            result.error = FileOpError.rootUnavailable.localizedDescription
+            return result
+        }
+        let scoped = rootURL.startAccessingSecurityScopedResource()
+        defer { if scoped { rootURL.stopAccessingSecurityScopedResource() } }
+        let folder = parentDir.isEmpty ? rootURL : rootURL.appending(path: parentDir)
+
+        // 1. Indexed samples below the folder.
+        let below: SQL = parentDir.isEmpty ? "parentDir != ''" : "parentDir LIKE \(parentDir + "/%")"
+        let samples = (try? await database.reader.read { db in
+            try SQLRequest<SampleRow>(literal: """
+                SELECT * FROM sample_with_annotation WHERE rootId = \(rootId) AND status = 'present' AND \(below)
+                """).fetchAll(db)
+        }) ?? []
+        if !samples.isEmpty {
+            result.sampleResults = await perform(.move(destination: folder), on: samples)
+        }
+
+        // 2. Whatever else is still in the sub-folders; 3. trash the ones left empty.
+        let subs: [URL]
+        do { subs = try fs.subfolders(of: folder) } catch {
+            result.error = error.localizedDescription
+            return result
+        }
+        for sub in subs {
+            for file in (try? fs.files(under: sub)) ?? [] {
+                let target = Self.uniqueDestination(in: folder, filename: file.lastPathComponent, exists: fs.exists)
+                do {
+                    try fs.move(file, to: target)
+                    result.otherMoved += 1
+                } catch {
+                    let rel = String(file.path.dropFirst(folder.path.count + 1))
+                    result.otherFailed.append("\(rel): \(error.localizedDescription)")
+                }
+            }
+            if ((try? fs.files(under: sub)) ?? [sub]).isEmpty {
+                do {
+                    try fs.trash(sub)
+                    result.trashedFolders.append(sub.lastPathComponent)
+                } catch {
+                    result.keptFolders.append(sub.lastPathComponent)
+                }
+            } else {
+                result.keptFolders.append(sub.lastPathComponent)
+            }
+        }
+        // A sample whose tracked move failed (e.g. changed on disk since the last scan) was still
+        // moved by the plain pass above — it's counted there, not as a failure. The rescan after
+        // flattening re-indexes it; its hash-keyed rating/tags re-attach.
+        result.sampleResults.removeAll { !$0.succeeded && !fs.exists(rootURL.appending(path: $0.relativePath)) }
+        return result
+    }
+
+    private func availableRootURL(_ rootId: Int64) async -> URL? {
+        guard let root = try? await database.reader.read({ db in try Root.fetchOne(db, key: rootId) }),
+              root.isAvailable else { return nil }
+        return try? resolveRoot(root)
     }
 
     /// `name.ext`, `name (2).ext`, `name (3).ext`…

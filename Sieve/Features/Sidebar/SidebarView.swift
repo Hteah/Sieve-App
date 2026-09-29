@@ -47,6 +47,7 @@ struct SidebarView: View {
     @State private var appliedFirstRunDefault = false
     @State private var groupSheet: GroupSheet?
     @State private var groupNameDraft = ""
+    @State private var flattenRequest: FlattenRequest?
     @State private var quickTagRenameSlot: Int?
     @State private var quickTagIconSlot: Int?
     @State private var quickTagNameDraft = ""
@@ -276,6 +277,7 @@ struct SidebarView: View {
         .sheet(item: $importHere) { req in
             FinderImportSheet(request: req)
         }
+        .sheet(item: $flattenRequest) { req in FlattenFolderSheet(request: req) }
         .sheet(item: $moveHere) { req in
             MoveToFolderSheet(model: model, rows: req.rows, destination: req.destination,
                               offerCopy: req.offerCopy)
@@ -310,6 +312,9 @@ struct SidebarView: View {
                             .disabled(movableSelection.isEmpty)
                             Button("Find Duplicates") {
                                 model.filter.scope = .folderDuplicates(rootId: node.rootId, parentDir: node.path)
+                            }
+                            Button("Flatten Folder…") {
+                                flattenRequest = FlattenRequest(rootId: node.rootId, parentDir: node.path, name: node.name)
                             }
                         }
                 }
@@ -423,6 +428,7 @@ struct SidebarView: View {
             }
             .disabled(movableSelection.isEmpty)
             Button("Find Duplicates") { model.filter.scope = .folderDuplicates(rootId: id, parentDir: "") }
+            Button("Flatten Folder…") { flattenRequest = FlattenRequest(rootId: id, parentDir: "", name: root.name) }
             Divider()
             groupMenu(for: id, root: root)
             Divider()

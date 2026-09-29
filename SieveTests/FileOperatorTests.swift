@@ -280,3 +280,54 @@ struct FileOperatorTests {
         #expect(row["status"] == "present")
     }
 }
+
+struct FlattenFolderTests {
+    @Test func flattenPullsEveryFileUpAndTrashesEmptySubfolders() async throws {
+        let base = try Fixtures.tempDir()
+        let root = base.appending(path: "Root"); let trash = base.appending(path: "Trash")
+        let fm = FileManager.default
+        for d in [root.appending(path: "Kit/A/Deep"), root.appending(path: "Kit/B"), trash] {
+            try fm.createDirectory(at: d, withIntermediateDirectories: true)
+        }
+        try Fixtures.writeTone(to: root.appending(path: "Kit/top.wav"))
+        try Fixtures.writeTone(to: root.appending(path: "Kit/A/kick.wav"))
+        try Fixtures.writeTone(to: root.appending(path: "Kit/A/Deep/snare.wav"), frequency: 660)
+        try Fixtures.writeTone(to: root.appending(path: "Kit/B/kick.wav"), frequency: 880)   // name clash
+        try Data("x".utf8).write(to: root.appending(path: "Kit/B/kick.wav.asd"))            // un-indexed
+        try Data().write(to: root.appending(path: "Kit/A/.DS_Store"))
+
+        let db = try AppDatabase.inMemory()
+        let rootId: Int64 = try await db.writer.write { d in
+            var r = Root(name: "Root", bookmarkData: Data(), lastResolvedPath: root.path, volumeUUID: nil)
+            try r.insert(d)
+            for rel in ["Kit/top.wav", "Kit/A/kick.wav", "Kit/A/Deep/snare.wav", "Kit/B/kick.wav"] {
+                let url = root.appending(path: rel)
+                let v = try url.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey, .creationDateKey])
+                var s = Sample(rootId: r.id!, relativePath: rel, fileSize: Int64(v.fileSize!), modifiedAt: v.contentModificationDate!, createdAt: v.creationDate ?? v.contentModificationDate!)
+                s.audioHash = AudioAnalyzer.analyze(url: url).audioHash; s.indexedAt = Date()
+                try s.insert(d)
+            }
+            return r.id!
+        }
+        let fs = FakeFS(trashDir: trash)
+        let op = FileOperator(database: db, fs: fs, resolveRoot: { _ in root })
+
+        let plan = try #require(await op.flattenPlan(rootId: rootId, parentDir: "Kit"))
+        #expect(plan.subfolders == ["A", "B"])
+        #expect(plan.fileCount == 4)
+
+        let result = await op.flatten(rootId: rootId, parentDir: "Kit")
+        #expect(result.error == nil)
+        #expect(result.failedCount == 0)
+        #expect(result.movedCount == 4)
+        #expect(Set(result.trashedFolders) == ["A", "B"])
+        #expect(result.keptFolders.isEmpty)
+
+        let names = Set(try fm.contentsOfDirectory(atPath: root.appending(path: "Kit").path))
+        #expect(names == ["top.wav", "kick.wav", "kick (2).wav", "snare.wav", "kick.wav.asd"])
+
+        let rows = try await db.reader.read { try Sample.fetchAll($0) }
+        #expect(rows.count == 4)
+        #expect(rows.allSatisfy { $0.parentDir == "Kit" && $0.status == .present })
+    }
+}

@@ -837,6 +837,98 @@ struct MoveToFolderSheet: View {
     }
 }
 
+/// A folder's "Flatten Folder…": pulls every file out of its sub-folders into it and trashes the
+/// emptied sub-folders (see `FileOperator.flatten`).
+struct FlattenRequest: Identifiable {
+    let id = UUID()
+    let rootId: Int64
+    let parentDir: String   // "" = the root itself
+    let name: String
+}
+
+struct FlattenFolderSheet: View {
+    @Environment(AppEnvironment.self) private var env
+    @Environment(\.dismiss) private var dismiss
+    let request: FlattenRequest
+
+    @State private var plan: FileOperator.FlattenPlan?
+    @State private var loaded = false
+    @State private var result: FileOperator.FlattenResult?
+    @State private var working = false
+
+    private var op: FileOperator { FileOperator(database: env.database, bookmarks: env.bookmarks) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            if let result {
+                doneView(result)
+            } else if working {
+                ProgressView("Moving files…").frame(maxWidth: .infinity, minHeight: 80)
+            } else if !loaded {
+                ProgressView().frame(maxWidth: .infinity, minHeight: 80)
+            } else {
+                confirmView
+            }
+        }
+        .padding(20)
+        .frame(width: 460)
+        .task {
+            plan = await op.flattenPlan(rootId: request.rootId, parentDir: request.parentDir)
+            loaded = true
+        }
+    }
+
+    @ViewBuilder
+    private var confirmView: some View {
+        if let plan, !plan.subfolders.isEmpty {
+            Text("Flatten \u{201C}\(request.name)\u{201D}").font(.headline)
+            Text("Move \(plan.fileCount) file\(plan.fileCount == 1 ? "" : "s") out of \(plan.subfolders.count) sub-folder\(plan.subfolders.count == 1 ? "" : "s") into \u{201C}\(request.name)\u{201D}, then move the emptied sub-folders to the Trash.")
+                .fixedSize(horizontal: false, vertical: true)
+            List(plan.subfolders, id: \.self) { Label($0, systemImage: "folder") }
+                .frame(minHeight: 80, maxHeight: 200)
+            Text("No files are deleted. Ratings, tags and notes follow the files. A name clash gets a \u{201C} (2)\u{201D} suffix. A sub-folder is only trashed once it\u{2019}s empty.")
+                .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack {
+                Spacer()
+                Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
+                Button("Flatten") { run() }.keyboardShortcut(.defaultAction)
+            }
+        } else {
+            Text(plan == nil ? "The folder isn\u{2019}t available." : "\u{201C}\(request.name)\u{201D} has no sub-folders.")
+                .font(.headline)
+            HStack { Spacer(); Button("OK") { dismiss() }.keyboardShortcut(.defaultAction) }
+        }
+    }
+
+    private func doneView(_ r: FileOperator.FlattenResult) -> some View {
+        let failures = r.sampleResults.filter { !$0.succeeded }.map { "\($0.relativePath): \($0.error ?? "")" } + r.otherFailed
+        return VStack(alignment: .leading, spacing: 12) {
+            Text(r.error ?? "Moved \(r.movedCount) file\(r.movedCount == 1 ? "" : "s") · trashed \(r.trashedFolders.count) folder\(r.trashedFolders.count == 1 ? "" : "s")")
+                .font(.headline)
+            if !r.keptFolders.isEmpty {
+                Text("Left in place (not empty): \(r.keptFolders.joined(separator: ", "))")
+                    .font(.callout).foregroundStyle(.orange)
+            }
+            if !failures.isEmpty {
+                List(failures, id: \.self) { Text($0).font(.caption).foregroundStyle(.red) }
+                    .frame(minHeight: 80, maxHeight: 200)
+            }
+            HStack { Spacer(); Button("Done") { dismiss() }.keyboardShortcut(.defaultAction) }
+        }
+    }
+
+    private func run() {
+        working = true
+        Task {
+            let r = await op.flatten(rootId: request.rootId, parentDir: request.parentDir)
+            result = r
+            working = false
+            await env.scanner.scan(rootId: request.rootId)
+        }
+    }
+}
+
 /// Files / folders dragged in from Finder onto a folder in Sieve.
 struct FinderImportRequest: Identifiable {
     let id = UUID()
