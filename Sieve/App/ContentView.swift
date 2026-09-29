@@ -24,12 +24,17 @@ struct ContentView: View {
     var body: some View {
         Group {
             if let model {
-                splitView(model)
-                    .navigationSplitViewStyle(.balanced)
+                // The hint strip is stacked below the split view, not a `.safeAreaInset`: the
+                // split view's scroll views ignore a bottom inset and ran underneath it, hiding
+                // the list's status bar (sample count) and the foot of the sidebar.
+                VStack(spacing: 0) {
+                    splitView(model)
+                        .navigationSplitViewStyle(.balanced)
+                    hintStrip
+                }
                     .environment(controlHint)
                     .toolbarBackground(palette.chrome, for: .windowToolbar)
                     .toolbarBackgroundVisibility(.visible, for: .windowToolbar)
-                    .safeAreaInset(edge: .bottom, spacing: 0) { hintStrip }
                     .toolbar {
                         ToolbarItemGroup(placement: .primaryAction) {
                             Button { Task { await env.addRootViaPanel() } } label: { Label("Add Folder", systemImage: "folder.badge.plus") }
