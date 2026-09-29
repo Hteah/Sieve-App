@@ -15,6 +15,10 @@ struct DuplicateGroupsView: View {
     @State private var isWorking = false
     /// Folder mode only: also list the folder's files whose copy lives elsewhere in the library.
     @AppStorage("folderDuplicatesIncludeElsewhere") private var includeElsewhere = false
+    // Same preview settings as the library list: a click plays the file unless both are off.
+    @AppStorage("autoPreview") private var autoPreview = true
+    @AppStorage("browsePreview") private var browsePreview = false
+    @FocusState private var listFocused: Bool
     @Environment(\.openWindow) private var openWindow
 
     struct PendingOp: Identifiable {
@@ -60,6 +64,15 @@ struct DuplicateGroupsView: View {
                 }
                 .listStyle(.inset)
                 .themedSurface(palette)
+                .focusable()
+                .focusEffectDisabled()
+                .focused($listFocused)
+                .onKeyPress(.space) { togglePlayback() }
+                .onKeyPress(.escape) {
+                    guard env.player.isPlaying || env.player.isPaused else { return .ignored }
+                    env.player.stop()
+                    return .handled
+                }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -135,10 +148,14 @@ struct DuplicateGroupsView: View {
             .buttonStyle(.plain)
             .help(member.id == keeperId ? "This copy is kept"
                   : (keeperId == nil ? "Keep this copy" : "Keep this copy instead"))
-            WaveformView(summary: member.waveform.flatMap(WaveformSummary.init(encoded:)))
-                .frame(width: 90, height: 24)
+            memberWaveform(member)
             VStack(alignment: .leading, spacing: 1) {
-                Text(member.filename)
+                HStack(spacing: 4) {
+                    if env.player.currentSampleId == member.id && env.player.isPlaying {
+                        Image(systemName: "speaker.wave.2.fill").foregroundStyle(.tint).font(.caption)
+                    }
+                    Text(member.filename)
+                }
                 Text("\(rootName) / \(member.parentDir)").font(.caption).foregroundStyle(.secondary).lineLimit(1)
             }
             Spacer()
@@ -149,8 +166,7 @@ struct DuplicateGroupsView: View {
                 .frame(width: 70, alignment: .trailing)
         }
         .contentShape(Rectangle())
-        .onTapGesture { model.selection = [member.id] }
-        .onTapGesture(count: 2) { env.preview(member) }
+        .onTapGesture { select(member) }
         .contextMenu {
             Button("Play") { env.preview(member) }
             Button("Reveal in Finder") { env.revealInFinder(member) }
@@ -282,6 +298,51 @@ struct DuplicateGroupsView: View {
         }
         .padding(20)
         .frame(width: 480)
+    }
+
+    /// Waveform with the preview playhead; clicking it plays from that spot, like the list.
+    private func memberWaveform(_ member: SampleRow) -> some View {
+        let playhead: Double? = env.player.currentSampleId == member.id && env.player.duration > 0
+            ? env.player.position / env.player.duration : nil
+        return GeometryReader { geo in
+            WaveformView(summary: env.waveformCache.summary(id: member.id, data: member.waveform),
+                         playhead: playhead) { x in
+                model.selection = [member.id]
+                listFocused = true
+                env.seek(member, toFraction: max(0, min(1, x / max(1, geo.size.width))))
+            }
+        }
+        .frame(width: 120, height: 28)
+    }
+
+    /// Row click: select it and (preview settings allowing) play it from the top. Clicking the
+    /// row that's already loaded pauses / resumes it instead of restarting.
+    private func select(_ member: SampleRow) {
+        model.selection = [member.id]
+        listFocused = true
+        guard autoPreview || browsePreview else { return }
+        if env.player.currentSampleId == member.id, env.player.isPlaying {
+            env.player.pause()
+        } else if env.player.currentSampleId == member.id, env.player.isPaused {
+            env.player.resume()
+        } else {
+            env.preview(member)
+        }
+    }
+
+    /// Space: pause a running preview, resume a paused one, or start the selected copy.
+    private func togglePlayback() -> KeyPress.Result {
+        let selected = groups.lazy.flatMap(\.members).first { model.selection.contains($0.id) }
+        if env.player.isPlaying {
+            env.player.pause()
+        } else if env.player.isPaused, let selected, selected.id == env.player.currentSampleId {
+            env.player.resume()
+        } else if let selected {
+            env.preview(selected)
+        } else {
+            return .ignored
+        }
+        return .handled
     }
 
     private func observe() async {
