@@ -92,7 +92,7 @@ struct SampleListView: View {
         Table(model.rows, selection: $model.selection, sortOrder: sortComparators,
               columnCustomization: $columnCustomization) {
                 TableColumn("Waveform") { row in
-                    WaveformCell(env: env, row: row) { fraction in
+                    WaveformCell(env: env, row: row, dragItems: { dragItems(for: row) }) { fraction in
                         model.selection = [row.id]
                         if browsePreview {
                             env.preview(row)                       // browse mode: always from the top
@@ -236,11 +236,6 @@ struct SampleListView: View {
                 guard env.player.currentSampleId != row.id else { return }
                 env.preview(row)
             }
-            // Multi-item drag: each row cell is a `draggable(containerItemID:)`; dragging a row
-            // that's part of the selection carries the whole selection (one pasteboard item per
-            // sample), dragging an unselected row carries just that row — like Finder.
-            .dragContainer(for: SampleDrag.self) { ids in sampleDrags(for: ids) }
-            .dragContainerSelection(Array(model.selection))
             .overlay {
                 if model.rows.isEmpty { emptyState }
             }
@@ -360,17 +355,16 @@ struct SampleListView: View {
         // `LibraryViewModel.loadMoreIfNeeded`. A large scope only ever loads a bounded page at a
         // time, so a sort/filter change never has to rebuild more than that many rows.
         .onAppear { model.loadMoreIfNeeded(near: row) }
-        .draggable(containerItemID: row.id)
+        .sampleDragSource { dragItems(for: row) }
     }
 
-    /// Drag payloads for the dragged row ids, in list order.
-    private func sampleDrags(for ids: [Int64]) -> [SampleDrag] {
-        let wanted = Set(ids)
-        return model.rows.filter { wanted.contains($0.id) }.map { row in
-            SampleDrag(id: row.id,
-                       fileURL: env.fileURL(for: row),
-                       rootURL: env.rootURL(for: row.rootId),
-                       filename: row.filename)
+    /// What dragging `row` carries: the whole selection (in list order) if the row is part of it,
+    /// otherwise just that row — like Finder.
+    private func dragItems(for row: SampleRow) -> [SampleDragSource.Item] {
+        let wanted = model.selection.contains(row.id) ? model.selection : [row.id]
+        return model.rows.filter { wanted.contains($0.id) }.compactMap { row in
+            guard let url = env.fileURL(for: row) else { return nil }
+            return SampleDragSource.Item(id: row.id, fileURL: url, rootURL: env.rootURL(for: row.rootId))
         }
     }
 
@@ -578,57 +572,13 @@ struct SampleListView: View {
     }
 }
 
-/// Drag payload for a sample row: exports the real audio file (for Finder / other apps), the
-/// sample id **as plain text** so the sidebar's AppKit drop catchers can read it off the
-/// pasteboard (SwiftUI's own `.dropDestination` on `List` rows loses the payload), and the same
-/// file again as a **plain file URL** (see below).
-///
-/// FileRepresentation hands the file over as a file *promise* -- a pasteboard mechanism only
-/// apps that specifically support NSFilePromiseReceiver know how to resolve (Finder chief among
-/// them). A plain AppKit/JUCE-style NSDraggingDestination -- the older, simpler kind that just
-/// expects a file URL already sitting on the pasteboard -- never sees a promise-based drag at
-/// all, so a drop onto one of those silently does nothing (dragging onto the Desktop first,
-/// where Finder resolves the promise into a real file, then works fine -- that's the tell).
-/// The ProxyRepresentation below exports the same URL through URL's own Transferable
-/// conformance, which puts a genuine file-url pasteboard item rather than a promise, so those
-/// apps have something to read directly.
-struct SampleDrag: Transferable, Identifiable {
-    let id: Int64
-    let fileURL: URL?
-    let rootURL: URL?
-    let filename: String
-
-    static var transferRepresentation: some TransferRepresentation {
-        FileRepresentation(exportedContentType: .audio) { drag in
-            guard let fileURL = drag.fileURL, let rootURL = drag.rootURL else {
-                throw CocoaError(.fileNoSuchFile)
-            }
-            // Keep the root readable while the receiver copies the file, then rebalance.
-            if rootURL.startAccessingSecurityScopedResource() {
-                Task { @MainActor in
-                    try? await Task.sleep(for: .seconds(20))
-                    rootURL.stopAccessingSecurityScopedResource()
-                }
-            }
-            return SentTransferredFile(fileURL)
-        }
-        .suggestedFileName { $0.filename }
-
-        ProxyRepresentation(exporting: { String($0.id) })
-
-        ProxyRepresentation(exporting: { drag -> URL in
-            guard let fileURL = drag.fileURL else { throw CocoaError(.fileNoSuchFile) }
-            return fileURL
-        })
-    }
-}
-
 struct WaveformCell: View {
     /// Passed in, not read from `@Environment`: the Table's drag container re-renders dragged cells
     /// for the drag image outside the window's environment, and an `@Environment(AppEnvironment.self)`
     /// lookup there is a fatal "No Observable object" assertion.
     let env: AppEnvironment
     let row: SampleRow
+    var dragItems: () -> [SampleDragSource.Item] = { [] }
     var onSeek: ((Double) -> Void)? = nil
 
     var body: some View {
@@ -651,7 +601,7 @@ struct WaveformCell: View {
         }
         .frame(height: 36)
         .frame(maxWidth: .infinity)
-        .draggable(containerItemID: row.id)   // payload comes from the Table's dragContainer
+        .sampleDragSource(dragItems)
     }
 }
 

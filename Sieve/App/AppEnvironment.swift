@@ -42,6 +42,7 @@ final class AppEnvironment {
         self.audioEditorBookmark = UserDefaults.standard.data(forKey: Self.editorBookmarkKey)
         self.audioEditorName = UserDefaults.standard.string(forKey: Self.editorNameKey)
         Task { await observeScanProgress() }
+        Task.detached(priority: .background) { Self.purgeStaleDragCopies() }
         volumeMonitor.onChange = { [weak self] in
             Task { await self?.scanner.refreshAvailability() }
         }

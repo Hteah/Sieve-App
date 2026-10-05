@@ -592,10 +592,10 @@ enum SampleDropPayload {
 /// AppKit drop target for a sample-row drag, placed as a `.background` behind a sidebar folder /
 /// tag row or the list pane. SwiftUI's own `.dropDestination` on `List` rows takes the hover but
 /// hands the drop an empty payload, and doesn't see drags from another window at all; reading
-/// `NSPasteboard` directly works for both. The dragged rows carry their id as plain text
-/// (`SampleDrag`); the drop handler resolves ids against the DB, since a cross-window drop lands
-/// in a window whose filtered list may not contain them. With `acceptsFiles`, Finder file / folder
-/// drags are accepted too; a Sieve row drag also carries a file URL, so ids always win.
+/// `NSPasteboard` directly works for both. A Sieve row drag (`SampleDragSource`) is recognised by its
+/// dragging source and its ids read from there; the drop handler resolves ids against the DB, since a
+/// cross-window drop lands in a window whose filtered list may not contain them. With `acceptsFiles`,
+/// Finder file / folder drags are accepted too; a Sieve row drag also carries file URLs, so ids win.
 struct SampleDropCatcher: NSViewRepresentable {
     var acceptsSamples = true
     var acceptsFiles = false
@@ -627,8 +627,8 @@ struct SampleDropCatcher: NSViewRepresentable {
             acceptsFiles = files
             unregisterDraggedTypes()
             var types: [NSPasteboard.PasteboardType] = []
-            if samples { types.append(.string) }
-            if files { types.append(.fileURL) }
+            // A Sieve row drag carries only file URLs on the pasteboard (ids come from its source).
+            if samples || files { types.append(.fileURL) }
             registerForDraggedTypes(types)
         }
 
@@ -655,29 +655,23 @@ struct SampleDropCatcher: NSViewRepresentable {
         }
 
         private func payload(from sender: NSDraggingInfo) -> SampleDropPayload? {
-            let pb = sender.draggingPasteboard
-            let ids = Self.ids(from: pb)
-            if !ids.isEmpty { return acceptsSamples ? .samples(ids) : nil }
+            if sender.draggingSource is SampleDragSource {
+                let ids = MainActor.assumeIsolated { SampleDragSource.shared.draggedIds }
+                return acceptsSamples && !ids.isEmpty ? .samples(ids) : nil
+            }
             guard acceptsFiles else { return nil }
+            let pb = sender.draggingPasteboard
             let urls = (pb.readObjects(forClasses: [NSURL.self],
                                        options: [.urlReadingFileURLsOnly: true]) as? [URL]) ?? []
             return urls.isEmpty ? nil : .files(urls)
-        }
-
-        private static func ids(from pb: NSPasteboard) -> [Int64] {
-            if let items = pb.pasteboardItems, !items.isEmpty {
-                let parsed = items.compactMap { $0.string(forType: .string).flatMap { Int64($0) } }
-                if !parsed.isEmpty { return parsed }
-            }
-            if let s = pb.string(forType: .string), let one = Int64(s) { return [one] }
-            return []
         }
     }
 }
 
 /// Drag payload for a sidebar folder / drive row: the folder itself, as a file promise (Finder
-/// copies the whole tree) and as a plain file URL for apps that only read those. It carries no
-/// sample id, so Sieve's own `SampleDropCatcher`s ignore it.
+/// copies the whole tree) and as a plain file URL for apps that only read those. Unlike sample rows
+/// (`SampleDragSource`) this is still SwiftUI's drag, so it goes via a copy in the Drag- cache —
+/// `AppEnvironment.purgeStaleDragCopies` clears those at launch.
 struct FolderDrag: Transferable {
     let url: URL?
     let rootURL: URL?

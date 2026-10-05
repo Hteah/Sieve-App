@@ -170,3 +170,22 @@ extension AppEnvironment {
         }
     }
 }
+
+extension AppEnvironment {
+    /// Deletes SwiftUI's drag copies (Caches/com.apple.SwiftUI.Drag-*, filePromises-*) older than a
+    /// day. Sidebar folder drags still go through SwiftUI's drag, which copies into these and never
+    /// cleans up (they once reached 17 GB). Only Sieve's own container cache is touched.
+    nonisolated static func purgeStaleDragCopies() {
+        let fm = FileManager.default
+        guard let caches = fm.urls(for: .cachesDirectory, in: .userDomainMask).first,
+              let entries = try? fm.contentsOfDirectory(at: caches, includingPropertiesForKeys: [.contentModificationDateKey])
+        else { return }
+        let cutoff = Date().addingTimeInterval(-24 * 60 * 60)
+        for url in entries {
+            let name = url.lastPathComponent
+            guard name.hasPrefix("com.apple.SwiftUI.Drag-") || name.hasPrefix("filePromises-") else { continue }
+            let modified = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+            if let modified, modified < cutoff { try? fm.removeItem(at: url) }
+        }
+    }
+}
