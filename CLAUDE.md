@@ -139,10 +139,13 @@ isolation boundaries — create and consume them in one actor/task and emit valu
 
 ## SwiftUI gotchas hit in this codebase
 
-- **Drag container:** the list uses `.dragContainer(for: SampleDrag.self)` + `.draggable(containerItemID:)`
-  (multi-item drag to Finder). Any view inside a `draggable(containerItemID:)` cell must **not** read
-  `@Environment(AppEnvironment.self)` — the drag image is rendered outside the window environment and asserts
-  ("No Observable object"). Pass `env` in explicitly (see `WaveformCell`).
+- **Sample-row drag-out is AppKit, not `.draggable`** (`Features/Library/SampleDragSource.swift`,
+  `.sampleDragSource {}`): plain `NSURL`s of the original files, `.copy` only; `SampleDropCatcher` reads the
+  ids from `SampleDragSource.shared`. SwiftUI's Transferable/FileRepresentation copies every dragged file
+  into `Caches/com.apple.SwiftUI.Drag-*` and hands receivers (R3WRK) the copy's path;
+  `allowAccessingOriginalFile` or a `.fileURL` DataRepresentation leave `public.file-url` empty instead —
+  all tried 2026-10-05, none work. Sidebar folder drags still use `.draggable`; `purgeStaleDragCopies` clears
+  their copies at launch.
 - **Bottom `.safeAreaInset` on the `NavigationSplitView` is ignored by its scroll views** — content runs
   underneath it. The control-info hint strip is therefore stacked in a `VStack` below the split view.
 - `.onTapGesture` followed by `.onTapGesture(count: 2)` — the single tap swallows the double; don't rely on it.
