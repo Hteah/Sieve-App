@@ -51,6 +51,32 @@ extension AppEnvironment {
         }
     }
 
+    /// Ejects an external drive from the sidebar's External Drives section. Lets go of anything
+    /// Sieve is playing from it first; refuses (with a message) while the editor holds unsaved
+    /// edits to a file on it. On success nothing else is needed: VolumeMonitor sees the unmount
+    /// and refreshAvailability() marks its folders unavailable. macOS's own error (disk busy,
+    /// not permitted) is shown if it won't eject.
+    func ejectDrive(named name: String) async {
+        let volume = DriveInfo.volumeURL(forDrive: name)
+        let onDrive: (URL) -> Bool = { DriveInfo.externalDriveName(forPath: $0.path) == name }
+
+        if let src = editor.source, onDrive(src.url) {
+            if editor.isDirty {
+                lastError = EjectError.unsavedEdits(name).localizedDescription
+                return
+            }
+            editor.stopPlayback()
+        }
+        player.stop()
+
+        do {
+            try await Task.detached { try NSWorkspace.shared.unmountAndEjectDevice(at: volume) }.value
+        } catch {
+            report(error)                                  // logs it
+            lastError = "Couldn\u{2019}t eject \u{201C}\(name)\u{201D}: \(error.localizedDescription)"   // shown readable
+        }
+    }
+
     /// Resolves a root's bookmark to a URL (cached). Caller must hold security scope on it to read children.
     func rootURL(for rootId: Int64) -> URL? {
         if let cached = rootURLCache[rootId] { return cached }
@@ -186,6 +212,17 @@ extension AppEnvironment {
             guard name.hasPrefix("com.apple.SwiftUI.Drag-") || name.hasPrefix("filePromises-") else { continue }
             let modified = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
             if let modified, modified < cutoff { try? fm.removeItem(at: url) }
+        }
+    }
+}
+
+enum EjectError: LocalizedError {
+    case unsavedEdits(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .unsavedEdits(let drive):
+            "The editor has unsaved edits to a file on \u{201C}\(drive)\u{201D}. Save or discard them first, then eject."
         }
     }
 }
