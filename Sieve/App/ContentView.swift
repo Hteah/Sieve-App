@@ -40,17 +40,21 @@ struct ContentView: View {
                     .toolbarBackground(palette.chrome, for: .windowToolbar)
                     .toolbarBackgroundVisibility(.visible, for: .windowToolbar)
                     .toolbar {
-                        ToolbarItemGroup(placement: .primaryAction) {
-                            Button { Task { await env.addRootViaPanel() } } label: { Label("Add Folder", systemImage: "folder.badge.plus") }
-                                .infoBubble("Add a folder of samples")
+                        // Add Folder lives in the sidebar (and File menu), so the toolbar keeps just Rescan, then,
+                        // in a group of its own with some room, the volume slider (2026-10-07, Heath).
+                        ToolbarItem(placement: .primaryAction) {
                             Button { Task { await env.scanner.scanAll() } } label: { Label("Rescan", systemImage: "arrow.clockwise") }
                                 .infoBubble("Rescan all folders")
                                 .disabled(env.scanState.isScanning)
                         }
+                        ToolbarSpacer(.fixed, placement: .primaryAction)
                         // iTunes-style: one volume for everything Sieve plays, always visible top right.
+                        // Its own item, off the shared glass capsule (macOS 26 otherwise merges it with Rescan's).
                         ToolbarItem(placement: .primaryAction) {
                             ToolbarVolumeSlider(volume: Binding(get: { volume }, set: { env.setVolume($0) }))
+                                .padding(.horizontal, 8)
                         }
+                        .sharedBackgroundVisibility(.hidden)
                     }
                     .onChange(of: model.primarySelection?.id) { _, _ in
                         followTask?.cancel()
