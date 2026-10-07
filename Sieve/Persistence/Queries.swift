@@ -190,7 +190,9 @@ enum Queries {
 
         switch filter.scope {
         case .all:
-            wheres.append("status != 'unavailable'")
+            // Only files that play (2026-10-07, Heath): unplugged drives' files and missing ones (renamed /
+            // moved / deleted outside Sieve) are under Missing and their own folders, not here.
+            wheres.append("status = 'present'")
         case .favorites:
             wheres.append("isFavorite = 1")
         case .missing:

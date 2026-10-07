@@ -54,6 +54,27 @@ struct DatabaseTests {
         #expect(total == 4)
     }
 
+    /// All Samples lists only files that play; Missing lists the rest; a folder shows all of its own.
+    @Test func allSamplesHidesMissingAndUnavailable() async throws {
+        let db = try makeDB()
+        let rootId = try await seed(db)
+        try await db.writer.write { d in
+            for (path, status) in [("Gone.wav", "missing"), ("Unplugged.wav", "unavailable")] {
+                var s = Sample(rootId: rootId, relativePath: path, fileSize: 1, modifiedAt: .init(), createdAt: .init())
+                s.status = SampleStatus(rawValue: status)!
+                try s.insert(d)
+            }
+        }
+        func names(_ f: SampleFilter) async throws -> Set<String> {
+            try await Set(db.reader.read { try Queries.request(for: f).fetchAll($0) }.map(\.filename))
+        }
+        let all = try await names(SampleFilter())
+        #expect(all.count == 4 && !all.contains("Gone.wav") && !all.contains("Unplugged.wav"))
+        #expect(try await names(SampleFilter(scope: .missing)) == ["Gone.wav", "Unplugged.wav"])
+        #expect(try await names(SampleFilter(scope: .root(rootId))).contains("Gone.wav"))
+        #expect(try await db.reader.read { try Queries.countRequest(for: SampleFilter()).fetchOne($0) } == 4)
+    }
+
     @Test func folderTreeNests() async throws {
         let db = try makeDB()
         let rootId = try await seed(db)
