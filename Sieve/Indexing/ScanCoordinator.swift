@@ -277,6 +277,10 @@ actor ScanCoordinator {
         // 5. Enrich anything not yet analyzed (added + modified, or leftovers from a cancelled run).
         try await enrich(rootId: rootId, rootName: name, rootURL: url)
 
+        // 6. Files renamed / moved outside Sieve: drop the stale "missing" row now that the new name is hashed.
+        let dropped = try await database.writer.write { db in try RenameReconciler.dropRenamedMissing(db: db, rootId: rootId) }
+        if dropped > 0 { Self.log.info("root \(name, privacy: .public): \(dropped) renamed file(s) reconciled") }
+
         try await database.writer.write { db in
             try db.execute(sql: "UPDATE root SET lastScanCompleted = ? WHERE id = ?", arguments: [Date(), rootId])
         }
