@@ -4,7 +4,7 @@ import SwiftUI
 struct SettingsView: View {
     @AppStorage("autoPreview") private var autoPreview = true
     @AppStorage("browsePreview") private var browsePreview = false
-    @AppStorage("previewVolume") private var previewVolume = 1.0
+    @AppStorage(AppEnvironment.volumeKey) private var volume = 1.0
     @AppStorage("editorNormalizeDb") private var normalizeDb = -1.0
     @AppStorage("editorMaxMinutes") private var editorMaxMinutes = 10
     @AppStorage("appBrightness") private var brightness = 0.0
@@ -29,8 +29,7 @@ struct SettingsView: View {
             Toggle("Auto-preview while browsing", isOn: $browsePreview)
             Text("Clicking anywhere on a row — or arrowing through the list — plays it from the start. The waveform stops seeking to the click point while this is on. Also toggled by the ◉ button above the list (⌃⌘B).")
                 .font(.caption).foregroundStyle(.secondary)
-            Slider(value: $previewVolume, in: 0...1) { Text("Preview volume") }
-                .onChange(of: previewVolume, initial: true) { _, v in env.player.volume = Float(v) }
+            Slider(value: Binding(get: { volume }, set: { env.setVolume($0) }), in: 0...1) { Text("Volume") }
             LabeledContent("Indexed extensions", value: Queries.audioExtensions.joined(separator: ", "))
 
             Divider()

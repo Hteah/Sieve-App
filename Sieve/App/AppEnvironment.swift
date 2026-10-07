@@ -23,6 +23,25 @@ final class AppEnvironment {
 
     static let editorBookmarkKey = "audioEditorBookmark"
     static let editorNameKey = "audioEditorName"
+    /// The one volume for everything Sieve plays (list / duplicates previews and the editor). The key is
+    /// still "previewVolume" so the level set before 2026-10-07 carries over.
+    static let volumeKey = "previewVolume"
+
+    var volume: Double { (UserDefaults.standard.object(forKey: Self.volumeKey) as? Double) ?? 1 }
+
+    /// Stores the volume and applies it to both players at once.
+    func setVolume(_ value: Double) {
+        let v = min(1, max(0, value))
+        UserDefaults.standard.set(v, forKey: Self.volumeKey)
+        player.volume = Float(v)
+        editor.player.volume = Float(v)
+    }
+
+    /// For `ToolbarVolumeSlider` (pair it with `@AppStorage(AppEnvironment.volumeKey)` in the view so it
+    /// redraws when the value changes elsewhere).
+    var volumeBinding: Binding<Double> {
+        Binding(get: { self.volume }, set: { self.setVolume($0) })
+    }
 
     static let log = Logger(subsystem: "com.arlo.Sieve", category: "app")
 
@@ -35,7 +54,7 @@ final class AppEnvironment {
         // Settings itself was on screen (its .onChange(initial: true) is what applied it), so a
         // launch that never opened Settings left the player at its hardcoded default of full
         // volume regardless of what was persisted. Apply it here instead, once, at the source.
-        if let stored = UserDefaults.standard.object(forKey: "previewVolume") as? Double {
+        if let stored = UserDefaults.standard.object(forKey: Self.volumeKey) as? Double {
             player.volume = Float(stored)
         }
         self.volumeMonitor = VolumeMonitor()

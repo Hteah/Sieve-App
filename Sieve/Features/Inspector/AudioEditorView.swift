@@ -17,7 +17,7 @@ struct AudioEditorView: View {
     @AppStorage("editorNormalizeDb") private var normalizeDb = -1.0
     @AppStorage("editorFloatOnTop") private var floatOnTop = true
     @AppStorage("editorFollowPlayhead") private var followPlayhead = false
-    @AppStorage("editorVolume") private var editorVolume = 1.0
+    @AppStorage(AppEnvironment.volumeKey) private var volume = 1.0   // redraws the slider on change
 
     @State private var saveBits: BitDepthOption = .int24
     @State private var amplifyDb = 0.0
@@ -180,15 +180,6 @@ struct AudioEditorView: View {
         return session.hasClip ? session.cursor : nil
     }
 
-    /// Writes through to both the persisted default (so the next session/window starts here
-    /// too) and the live player -- EditorSession.init applies the persisted value at creation,
-    /// but that's before this view exists, so live changes need to reach the player directly.
-    private var editorVolumeBinding: Binding<Double> {
-        Binding(
-            get: { editorVolume },
-            set: { editorVolume = $0; session.player.volume = Float($0) })
-    }
-
     private var transport: some View {
         HStack(spacing: 8) {
             Button { session.playFromStart() } label: {
@@ -217,7 +208,10 @@ struct AudioEditorView: View {
 
             Spacer()
 
-            VolumeControl(volume: editorVolumeBinding)
+            // The pop-out window has no main toolbar, so the Sieve volume slider sits here too.
+            if isPopOut {
+                ToolbarVolumeSlider(volume: Binding(get: { volume }, set: { env.setVolume($0) }))
+            }
 
             recordControls
         }

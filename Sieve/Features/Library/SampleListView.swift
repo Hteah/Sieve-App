@@ -609,7 +609,6 @@ struct FilterBar: View {
     @Environment(AppEnvironment.self) private var env
     @Environment(\.palette) private var palette
     @Bindable var model: LibraryViewModel
-    @AppStorage("previewVolume") private var previewVolume = 1.0
 
     var body: some View {
         // Falls back to a horizontally scrollable row when the centre pane is too narrow for the
@@ -664,16 +663,7 @@ struct FilterBar: View {
         }
         .toggleStyle(.button)
         .help(env.player.looping ? "Looping the preview — click to stop" : "Loop the previewed sample")
-
-        VolumeControl(volume: previewVolumeBinding)
-    }
-
-    /// Writes through to both the persisted default (Settings' own "Preview volume" slider
-    /// shares this same key, so the two stay in sync) and the live player.
-    private var previewVolumeBinding: Binding<Double> {
-        Binding(
-            get: { previewVolume },
-            set: { previewVolume = $0; env.player.volume = Float($0) })
+        // Volume: the toolbar slider at the window's top right (ToolbarVolumeSlider).
     }
 }
 

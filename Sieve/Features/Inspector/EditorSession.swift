@@ -64,9 +64,9 @@ final class EditorSession {
     init(env: AppEnvironment) {
         self.env = env
         self.recorder = AudioRecorder(env: env, player: player)
-        // See AppEnvironment.init's identical guard on "previewVolume" -- same reasoning, this
-        // player's own persisted key.
-        if let stored = UserDefaults.standard.object(forKey: "editorVolume") as? Double {
+        // The one Sieve volume (AppEnvironment.volumeKey), applied at creation like AppEnvironment.init
+        // does for the preview player; the toolbar slider updates both live (AppEnvironment.setVolume).
+        if let stored = UserDefaults.standard.object(forKey: AppEnvironment.volumeKey) as? Double {
             player.volume = Float(stored)
         }
     }
