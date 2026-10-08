@@ -47,6 +47,7 @@ struct ContentView: View {
                                 .infoBubble("Rescan all folders")
                                 .disabled(env.scanState.isScanning)
                         }
+                        .sharedBackgroundVisibility(.hidden)   // a plain glyph, no dark circle (Heath, 2026-10-07)
                         ToolbarSpacer(.fixed, placement: .primaryAction)
                         // iTunes-style: one volume for everything Sieve plays, always visible top right.
                         // Its own item, off the shared glass capsule (macOS 26 otherwise merges it with Rescan's).
